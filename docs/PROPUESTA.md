@@ -2,11 +2,11 @@
 
 ## 1. Datos del Grupo
 
-| Apellido | Nombre | Email |
+| Apellido | Nombre | Github |
 |----------|--------|-------|
-| [APELLIDO 1] | [NOMBRE 1] | [EMAIL 1] |
-| [APELLIDO 2] | [NOMBRE 2] | [EMAIL 2] |
-| [APELLIDO 3] | [NOMBRE 3] | [EMAIL 3] |
+| Roldán | Saúl | GitHub: saul28roldan-pixel |
+| Ontiveros | José | GitHub: jontive21 |
+|  Orozco| Miguel | GitHub: BLACK1895 |
 
 *(Reemplazar con los datos reales de los integrantes del grupo)*
 
@@ -60,4 +60,4 @@ Se propone desarrollar **TallerApp**, un sistema web MVC que permita:
 
 ## 7. Diagrama Entidad-Relación (DER)
 
-![Diagrama Entidad-Relación](docs/der.png)
+![Diagrama Entidad-Relación](docs/DER_TallerApp.drawio.png)
