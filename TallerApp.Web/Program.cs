@@ -6,9 +6,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 
 // Registrar el repositorio de usuario
-builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();
+builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();   
+builder.Services.AddScoped<IRepositorioCliente, RepositorioCliente>();
+builder.Services.AddScoped<IRepositorioVehiculo, RepositorioVehiculo>();
+builder.Services.AddScoped<IRepositorioMecanico, RepositorioMecanico>();
+builder.Services.AddScoped<IRepositorioRepuesto, RepositorioRepuesto>();
 
-// Configurar autenticación por cookies
+// Configurar autenticaciï¿½n por cookies
 builder.Services.AddAuthentication("Cookies")
     .AddCookie("Cookies", options => {
         options.LoginPath = "/Account/Login";
