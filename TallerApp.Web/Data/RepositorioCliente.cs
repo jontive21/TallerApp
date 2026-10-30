@@ -13,6 +13,7 @@ public List<Cliente> ObtenerTodos()
         {
             var lista = new List<Cliente>();
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Clientes", conexion);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
@@ -32,6 +33,7 @@ public List<Cliente> ObtenerTodos()
         public Cliente? ObtenerPorId(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Clientes WHERE IdCliente = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             using var reader = cmd.ExecuteReader();
@@ -52,6 +54,7 @@ public List<Cliente> ObtenerTodos()
         public void Alta(Cliente cliente)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("INSERT INTO Clientes (NombreCompleto, DNI, Telefono, Email, Direccion) VALUES (@nombre, @dni, @tel, @email, @dir)", conexion);
             cmd.Parameters.AddWithValue("@nombre", cliente.NombreCompleto);
             cmd.Parameters.AddWithValue("@dni", cliente.DNI);
@@ -64,6 +67,7 @@ public List<Cliente> ObtenerTodos()
         public void Modificar(Cliente cliente)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("UPDATE Clientes SET NombreCompleto=@nombre, DNI=@dni, Telefono=@tel, Email=@email, Direccion=@dir WHERE IdCliente=@id", conexion);
             cmd.Parameters.AddWithValue("@id", cliente.IdCliente);
             cmd.Parameters.AddWithValue("@nombre", cliente.NombreCompleto);
@@ -77,6 +81,7 @@ public List<Cliente> ObtenerTodos()
         public void Eliminar(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("DELETE FROM Clientes WHERE IdCliente = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             cmd.ExecuteNonQuery();

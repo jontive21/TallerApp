@@ -13,6 +13,7 @@ public List<Mecanico> ObtenerTodos()
         {
             var lista = new List<Mecanico>();
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Mecanicos", conexion);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
@@ -32,6 +33,7 @@ public List<Mecanico> ObtenerTodos()
         public Mecanico? ObtenerPorId(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Mecanicos WHERE IdMecanico = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             using var reader = cmd.ExecuteReader();
@@ -52,6 +54,7 @@ public List<Mecanico> ObtenerTodos()
         public void Alta(Mecanico mecanico)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("INSERT INTO Mecanicos (NombreCompleto, Matricula, Especialidad, Email, Telefono) VALUES (@nom, @mat, @esp, @ema, @tel)", conexion);
             cmd.Parameters.AddWithValue("@nom", mecanico.NombreCompleto);
             cmd.Parameters.AddWithValue("@mat", mecanico.Matricula);
@@ -64,6 +67,7 @@ public List<Mecanico> ObtenerTodos()
         public void Modificar(Mecanico mecanico)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("UPDATE Mecanicos SET NombreCompleto=@nom, Matricula=@mat, Especialidad=@esp, Email=@ema, Telefono=@tel WHERE IdMecanico=@id", conexion);
             cmd.Parameters.AddWithValue("@id", mecanico.IdMecanico);
             cmd.Parameters.AddWithValue("@nom", mecanico.NombreCompleto);
@@ -77,6 +81,7 @@ public List<Mecanico> ObtenerTodos()
         public void Eliminar(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("DELETE FROM Mecanicos WHERE IdMecanico = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             cmd.ExecuteNonQuery();

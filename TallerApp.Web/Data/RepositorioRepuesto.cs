@@ -13,6 +13,7 @@ public List<Repuesto> ObtenerTodos()
         {
             var lista = new List<Repuesto>();
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Repuestos", conexion);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
@@ -32,6 +33,7 @@ public List<Repuesto> ObtenerTodos()
         public Repuesto? ObtenerPorId(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("SELECT * FROM Repuestos WHERE IdRepuesto = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             using var reader = cmd.ExecuteReader();
@@ -52,6 +54,7 @@ public List<Repuesto> ObtenerTodos()
         public void Alta(Repuesto repuesto)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("INSERT INTO Repuestos (Nombre, Codigo, Precio, Stock, Foto) VALUES (@nom, @cod, @pre, @sto, @fot)", conexion);
             cmd.Parameters.AddWithValue("@nom", repuesto.Nombre);
             cmd.Parameters.AddWithValue("@cod", repuesto.Codigo);
@@ -64,6 +67,7 @@ public List<Repuesto> ObtenerTodos()
         public void Modificar(Repuesto repuesto)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("UPDATE Repuestos SET Nombre=@nom, Codigo=@cod, Precio=@pre, Stock=@sto, Foto=@fot WHERE IdRepuesto=@id", conexion);
             cmd.Parameters.AddWithValue("@id", repuesto.IdRepuesto);
             cmd.Parameters.AddWithValue("@nom", repuesto.Nombre);
@@ -77,6 +81,7 @@ public List<Repuesto> ObtenerTodos()
         public void Eliminar(int id)
         {
             using var conexion = ObtenerConexion();
+            conexion.Open();
             using var cmd = new MySqlCommand("DELETE FROM Repuestos WHERE IdRepuesto = @id", conexion);
             cmd.Parameters.AddWithValue("@id", id);
             cmd.ExecuteNonQuery();

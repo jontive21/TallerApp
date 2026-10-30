@@ -1,0 +1,10 @@
+﻿# Archivos de compilación de .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Archivos de usuario
+*.userosscache
+*.sln.docstates

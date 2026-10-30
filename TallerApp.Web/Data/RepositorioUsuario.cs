@@ -1,4 +1,4 @@
-using TallerApp.Web.Models;
+﻿using TallerApp.Web.Models;
 using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
 using MySqlConnector;
@@ -16,7 +16,7 @@ using MySqlConnector;
             var lista = new List<Usuario>();
             using (var connection = ObtenerConexion())
             {
-                var sql = "SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar FROM Usuario;";
+                var sql = "SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar FROM Usuarios;";
                 using (var command = new MySqlCommand(sql, connection))
                 {
                     connection.Open();
@@ -36,7 +36,7 @@ using MySqlConnector;
         {
             Usuario? u = null;
             string sql = @"SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar
-                            FROM Usuario
+                            FROM Usuarios
                             WHERE Email = @email";
 
             using (var connection = ObtenerConexion())
@@ -61,7 +61,7 @@ using MySqlConnector;
         {
             Usuario? u = null;
             string sql = @"SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar
-                            FROM Usuario
+                            FROM Usuarios
                             WHERE IdUsuario = @id";
 
             using (var connection = ObtenerConexion())
@@ -86,7 +86,7 @@ using MySqlConnector;
         {
             using (var connection = ObtenerConexion())
             {
-                var sql = @"INSERT INTO Usuario (Email, PasswordHash, NombreCompleto, Rol, Avatar) 
+                var sql = @"INSERT INTO Usuarios (Email, PasswordHash, NombreCompleto, Rol, Avatar) 
                             VALUES (@Email, @PasswordHash, @NombreCompleto, @Rol, @Avatar);";
                 using (var command = new MySqlCommand(sql, connection))
                 {
@@ -105,7 +105,7 @@ using MySqlConnector;
         {
             using (var connection = ObtenerConexion())
             {
-                var sql = @"UPDATE Usuario SET Email = @Email, PasswordHash = @PasswordHash, 
+                var sql = @"UPDATE Usuarios SET Email = @Email, PasswordHash = @PasswordHash, 
                             NombreCompleto = @NombreCompleto, Rol = @Rol, Avatar = @Avatar 
                             WHERE IdUsuario = @IdUsuario;";
                 using (var command = new MySqlCommand(sql, connection))
@@ -126,7 +126,7 @@ using MySqlConnector;
         {
             using (var connection = ObtenerConexion())
             {
-                var sql = "DELETE FROM Usuario WHERE IdUsuario = @IdUsuario;";
+                var sql = "DELETE FROM Usuarioss WHERE IdUsuario = @IdUsuario;";
                 using (var command = new MySqlCommand(sql, connection))
                 {
                     command.Parameters.AddWithValue("@IdUsuario", id);

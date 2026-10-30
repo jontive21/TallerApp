@@ -1,0 +1,31 @@
+﻿@model TallerApp.Web.Models.Vehiculo
+
+@{
+    ViewData["Title"] = "Eliminar Vehículo";
+    var clienteNombre = ViewBag.ClienteNombre as string;
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Vehículo</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este vehículo?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">Patente</dt>
+        <dd class="col-sm-9">@Model.Patente</dd>
+        <dt class="col-sm-3">Marca</dt>
+        <dd class="col-sm-9">@Model.Marca</dd>
+        <dt class="col-sm-3">Modelo</dt>
+        <dd class="col-sm-9">@Model.Modelo</dd>
+        <dt class="col-sm-3">Año</dt>
+        <dd class="col-sm-9">@Model.Anio</dd>
+        <dt class="col-sm-3">Color</dt>
+        <dd class="col-sm-9">@Model.Color</dd>
+        <dt class="col-sm-3">Cliente</dt>
+        <dd class="col-sm-9">@clienteNombre</dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdVehiculo" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
