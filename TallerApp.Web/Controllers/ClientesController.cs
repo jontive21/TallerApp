@@ -16,9 +16,17 @@ namespace TallerApp.Web.Controllers
         }
 
         // GET: Clientes
-        public IActionResult Index()
+        public IActionResult Index(string? busqueda, int pagina = 1)
         {
-            var clientes = _repositorioCliente.ObtenerTodos();
+            int registrosPorPagina = 10;
+            var clientes = _repositorioCliente.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioCliente.ObtenerTotalClientes(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+
             return View(clientes);
         }
 

@@ -19,11 +19,18 @@ namespace TallerApp.Web.Controllers
         }
 
         // GET: Vehiculos
-        public IActionResult Index()
+        public IActionResult Index(string? busqueda, int pagina = 1)
         {
-            var vehiculos = _repositorioVehiculo.ObtenerTodos();
-            // Para mostrar el nombre del cliente en la vista, necesitamos obtener los clientes
-            ViewBag.Clientes = _repositorioCliente.ObtenerTodos();
+            int registrosPorPagina = 10;
+            var vehiculos = _repositorioVehiculo.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioVehiculo.ObtenerTotalVehiculos(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, int.MaxValue);
+            
             return View(vehiculos);
         }
 

@@ -1,0 +1,39 @@
+﻿@model TallerApp.Web.Models.ComprobantePago
+
+@{
+    ViewData["Title"] = "Eliminar Comprobante de Pago";
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Comprobante de Pago</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este comprobante?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">ID</dt>
+        <dd class="col-sm-9">@Model.IdComprobante</dd>
+        <dt class="col-sm-3">Orden N°</dt>
+        <dd class="col-sm-9">@Model.OrdenId</dd>
+        <dt class="col-sm-3">Monto</dt>
+        <dd class="col-sm-9">$@Model.Monto.ToString("N2")</dd>
+        <dt class="col-sm-3">Fecha</dt>
+        <dd class="col-sm-9">@Model.FechaPago.ToString("dd/MM/yyyy")</dd>
+        <dt class="col-sm-3">Estado</dt>
+        <dd class="col-sm-9">@Model.Estado</dd>
+        <dt class="col-sm-3">Archivo</dt>
+        <dd class="col-sm-9">
+            @if (!string.IsNullOrEmpty(Model.ArchivoComprobante))
+            {
+                <a href="@Model.ArchivoComprobante" target="_blank">Ver archivo</a>
+            }
+            else
+            {
+                <span class="text-muted">Sin archivo</span>
+            }
+        </dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdComprobante" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>

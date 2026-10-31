@@ -5,7 +5,8 @@ namespace TallerApp.Web.Data
 {
     public interface IRepositorioMecanico
     {
-        List<Mecanico> ObtenerTodos();
+        List<Mecanico> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalMecanicos(string? busqueda = null);
         Mecanico? ObtenerPorId(int id);
         void Alta(Mecanico mecanico);
         void Modificar(Mecanico mecanico);

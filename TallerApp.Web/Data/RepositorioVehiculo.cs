@@ -7,14 +7,29 @@ namespace TallerApp.Web.Data
 {
     public class RepositorioVehiculo : RepositorioBase, IRepositorioVehiculo
     {
-        
         public RepositorioVehiculo(IConfiguration configuration) : base(configuration) { }
-public List<Vehiculo> ObtenerTodos()
+
+        public List<Vehiculo> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
         {
             var lista = new List<Vehiculo>();
             using var conexion = ObtenerConexion();
             conexion.Open();
-            using var cmd = new MySqlCommand("SELECT * FROM Vehiculos", conexion);
+            
+            string sql = "SELECT * FROM Vehiculos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Patente LIKE @busqueda OR Marca LIKE @busqueda OR Modelo LIKE @busqueda";
+            }
+            sql += " LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
@@ -29,6 +44,26 @@ public List<Vehiculo> ObtenerTodos()
                 });
             }
             return lista;
+        }
+
+        public int ObtenerTotalVehiculos(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM Vehiculos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Patente LIKE @busqueda OR Marca LIKE @busqueda OR Modelo LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
         }
 
         public List<Vehiculo> ObtenerPorCliente(int clienteId)
