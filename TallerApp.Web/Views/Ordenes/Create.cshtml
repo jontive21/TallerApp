@@ -11,10 +11,12 @@
     <div class="card shadow">
         <div class="card-body">
 
-            <!-- Cliente y Vehículo -->
+            <!-- Cliente con búsqueda asíncrona -->
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label">Cliente</label>
+                    <input type="text" class="form-control mb-2" v-model="busquedaCliente" 
+                           @@input="buscarClientes" placeholder="Buscar cliente por nombre o DNI...">
                     <select class="form-select" v-model="clienteId" @@change="cargarVehiculos">
                         <option value="">Seleccione un cliente...</option>
                         <option v-for="c in clientes" :value="c.idCliente">
@@ -34,10 +36,12 @@
                 </div>
             </div>
 
-            <!-- Mecánico -->
+            <!-- Mecánico con búsqueda asíncrona -->
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label">Mecánico</label>
+                    <input type="text" class="form-control mb-2" v-model="busquedaMecanico" 
+                           @@input="buscarMecanicos" placeholder="Buscar mecánico por nombre o matrícula...">
                     <select class="form-select" v-model="mecanicoId">
                         <option value="">Seleccione un mecánico...</option>
                         <option v-for="m in mecanicos" :value="m.idMecanico">
@@ -169,6 +173,10 @@
                     descripcionProblema: '',
                     observaciones: '',
 
+                    // Búsqueda asíncrona
+                    busquedaCliente: '',
+                    busquedaMecanico: '',
+
                     // Listas
                     clientes: [],
                     vehiculos: [],
@@ -186,16 +194,18 @@
                 }
             },
             mounted() {
-                this.cargarClientes();
-                this.cargarMecanicos();
+                // Ya no cargamos todos los clientes y mecánicos al inicio
+                // Se cargarán bajo demanda con la búsqueda
             },
             methods: {
-                async cargarClientes() {
-                    const res = await fetch('/Ordenes/GetClientes');
+                async buscarClientes() {
+                    if (this.busquedaCliente.length < 2) { this.clientes = []; return; }
+                    const res = await fetch(`/Ordenes/GetClientes?busqueda=${encodeURIComponent(this.busquedaCliente)}`);
                     this.clientes = await res.json();
                 },
-                async cargarMecanicos() {
-                    const res = await fetch('/Ordenes/GetMecanicos');
+                async buscarMecanicos() {
+                    if (this.busquedaMecanico.length < 2) { this.mecanicos = []; return; }
+                    const res = await fetch(`/Ordenes/GetMecanicos?busqueda=${encodeURIComponent(this.busquedaMecanico)}`);
                     this.mecanicos = await res.json();
                 },
                 async cargarVehiculos() {
@@ -271,9 +281,7 @@
                     };
 
                     try {
-                        // Por ahora apuntamos a un endpoint temporal.
-                        // Después el Integrante 3 lo cambiará a /api/Ordenes
-                           const res = await fetch('/Ordenes/CrearOrden', {
+                        const res = await fetch('/Ordenes/CrearOrden', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'

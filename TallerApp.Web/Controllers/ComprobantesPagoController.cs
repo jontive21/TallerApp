@@ -5,8 +5,9 @@ using TallerApp.Web.Models;
 
 namespace TallerApp.Web.Controllers
 {
-    [Authorize]
-    public class ComprobantesPagoController : Controller
+    
+    [Authorize(Policy = "SoloAdmin")]
+public class ComprobantesPagoController : Controller
     {
         private readonly IRepositorioComprobantePago _repositorio;
         private readonly IWebHostEnvironment _entorno;

@@ -1,0 +1,4948 @@
+﻿
+
+===== docs\PROPUESTA.md =====
+
+
+# Propuesta de Proyecto Integrador Final - TallerApp
+
+## 1. Datos del Grupo
+
+| Apellido | Nombre | Github |
+|----------|--------|-------|
+| RoldÃ¡n | SaÃºl | GitHub: saul28roldan-pixel |
+| Ontiveros | JosÃ© | GitHub: jontive21 |
+|  Orozco| Miguel | GitHub: BLACK1895 |
+
+*(Reemplazar con los datos reales de los integrantes del grupo)*
+
+## 2. TÃ­tulo del Proyecto
+
+**TallerApp - Sistema de GestiÃ³n Integral para Talleres MecÃ¡nicos**
+
+## 3. TemÃ¡tica Elegida
+
+Sistema web MVC para la gestiÃ³n de Ã³rdenes de trabajo, clientes, vehÃ­culos, mecÃ¡nicos y repuestos en un taller mecÃ¡nico.
+
+## 4. DescripciÃ³n de la ProblemÃ¡tica
+
+Los talleres mecÃ¡nicos pequeÃ±os y medianos suelen gestionar sus Ã³rdenes de trabajo, turnos, repuestos y facturaciÃ³n de manera manual o mediante planillas de cÃ¡lculo dispersas. Esto genera:
+- PÃ©rdida de trazabilidad sobre el estado de cada vehÃ­culo en reparaciÃ³n.
+- Dificultad para auditar quÃ© mecÃ¡nico realizÃ³ cada trabajo y quÃ© repuestos utilizÃ³.
+- Errores en el stock de repuestos por falta de control en tiempo real.
+- Imposibilidad de generar reportes de productividad por mecÃ¡nico o de rentabilidad por tipo de trabajo.
+
+## 5. Propuesta de SoluciÃ³n
+
+Se propone desarrollar **TallerApp**, un sistema web MVC que permita:
+- Gestionar el alta, baja y modificaciÃ³n de clientes, vehÃ­culos, mecÃ¡nicos y repuestos.
+- Crear **Ã“rdenes de Trabajo** que vinculen un vehÃ­culo, un mecÃ¡nico y los repuestos utilizados, con seguimiento de estado (Pendiente â†’ En Proceso â†’ Finalizada â†’ Entregada).
+- Controlar el stock de repuestos de forma automÃ¡tica al asignarlos a una orden.
+- Registrar comprobantes de pago asociados a cada orden (manejo de archivos).
+- Implementar un **mÃ³dulo SPA con Vue.js** para la gestiÃ³n Ã¡gil de Ã³rdenes de trabajo sin recargas de pÃ¡gina.
+- Exponer una **Web API REST con JWT** para consulta de Ã³rdenes y reportes.
+- Control de roles: **Administrador** (acceso total), **MecÃ¡nico** (solo ve sus Ã³rdenes asignadas), **Recepcionista** (gestiona clientes y turnos).
+
+## 6. Modelo de Datos
+
+### Entidades principales (8 tablas)
+
+| Entidad | DescripciÃ³n |
+|---------|-------------|
+| **Usuario** | IdUsuario, NombreCompleto, Email, PasswordHash, Rol, Avatar |
+| **Cliente** | IdCliente, NombreCompleto, DNI, Telefono, Email, Direccion |
+| **Vehiculo** | IdVehiculo, Patente, Marca, Modelo, Anio, Color, ClienteId (FK) |
+| **Mecanico** | IdMecanico, NombreCompleto, Matricula, Especialidad, Email, Telefono |
+| **Repuesto** | IdRepuesto, Nombre, Codigo, Precio, Stock, Foto (archivo) |
+| **OrdenTrabajo** | IdOrden, VehiculoId (FK), MecanicoId (FK), FechaIngreso, FechaEntrega, Estado, Descripcion, IdUsuarioCreacion |
+| **OrdenRepuesto** | IdOrdenRepuesto, OrdenId (FK), RepuestoId (FK), Cantidad, PrecioUnitario (relaciÃ³n N:M) |
+| **ComprobantePago** | IdComprobante, OrdenId (FK), Monto, FechaPago, ArchivoComprobante, Estado, IdUsuarioCreacion |
+
+### DescripciÃ³n de Relaciones
+- **Cliente â†’ VehÃ­culo (1:N):** Un cliente puede tener mÃºltiples vehÃ­culos registrados.
+- **OrdenTrabajo â†’ VehÃ­culo + MecÃ¡nico:** Cada orden pertenece a un vehÃ­culo y estÃ¡ asignada a un mecÃ¡nico.
+- **OrdenTrabajo â†” Repuesto (N:M):** Una orden usa mÃºltiples repuestos, y un repuesto se usa en muchas Ã³rdenes (vÃ­a tabla intermedia `OrdenRepuesto`).
+- **OrdenTrabajo â†’ ComprobantePago (1:N):** Una orden puede tener mÃºltiples comprobantes de pago.
+
+## 7. Diagrama Entidad-RelaciÃ³n (DER)
+
+![Diagrama Entidad-RelaciÃ³n](docs/DER_TallerApp.drawio.png)
+
+
+===== TallerApp.Web\Controllers\AccountController.cs =====
+
+
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Models;
+using TallerApp.Web.Data;
+
+namespace TallerApp.Web.Controllers
+{
+    public class AccountController : Controller
+    {
+        private readonly IRepositorioUsuario _repoUsuario;
+        private readonly IWebHostEnvironment _entorno;
+
+        private static readonly string[] ExtensionesPermitidas = { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+        private const long TamanioMaximoBytes = 2 * 1024 * 1024; // 2 MB
+
+        public AccountController(IRepositorioUsuario repoUsuario, IWebHostEnvironment entorno)
+        {
+            _repoUsuario = repoUsuario;
+            _entorno = entorno;
+        }
+
+        // MÉTODO TEMPORAL PARA CREAR USUARIO ADMIN DE PRUEBA
+        [HttpGet]
+        public IActionResult CrearAdminTest()
+        {
+            var usuario = new Usuario
+            {
+                NombreCompleto = "Administrador",
+                Email = "admin@tallerapp.com",
+                PasswordHash = PasswordHelper.GenerarHash("Admin123"),
+                Rol = "Admin"
+            };
+            _repoUsuario.Alta(usuario);
+            return Content("✅ Usuario Admin creado! Email: admin@tallerapp.com | Password: Admin123");
+        }
+
+        // ===================== LOGIN / LOGOUT =====================
+[HttpGet]
+public IActionResult DiagnosticarLogin()
+{
+    string emailPrueba = "admin@tallerapp.com";
+    string passwordPrueba = "Admin123";
+
+    var usuario = _repoUsuario.ObtenerPorEmail(emailPrueba);
+    
+    if (usuario == null)
+    {
+        return Content($"❌ ERROR: No se encontró ningún usuario con el email '{emailPrueba}' en la base de datos.");
+    }
+
+    bool esValido = PasswordHelper.VerificarHash(passwordPrueba, usuario.PasswordHash);
+    
+    if (esValido)
+    {
+        return Content($"✅ ÉXITO: El usuario '{usuario.Email}' fue encontrado y la contraseña '{passwordPrueba}' es CORRECTA.\nHash en BD: {usuario.PasswordHash}");
+    }
+    else
+    {
+        return Content($"❌ ERROR DE CONTRASEÑA: El usuario '{usuario.Email}' fue encontrado, pero la contraseña '{passwordPrueba}' NO coincide con el hash almacenado.\nHash en BD: {usuario.PasswordHash}");
+    }
+}
+        [HttpGet]
+        public IActionResult Login(string? returnUrl = null)
+        {
+            ViewData["ReturnUrl"] = returnUrl;
+            return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
+        {
+            ViewData["ReturnUrl"] = returnUrl;
+
+            if (ModelState.IsValid)
+            {
+                var usuario = _repoUsuario.ObtenerPorEmail(model.Email);
+
+                if (usuario != null && PasswordHelper.VerificarHash(model.Password, usuario.PasswordHash))
+                {
+                    var claims = new List<Claim>
+                    {
+                        new Claim(ClaimTypes.Name, usuario.NombreCompleto),
+                        new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()),
+                        new Claim(ClaimTypes.Role, usuario.Rol)
+                    };
+
+                    var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                    var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
+
+                    await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, claimsPrincipal);
+
+                    return LocalRedirect(returnUrl ?? "/");
+                }
+
+                ModelState.AddModelError(string.Empty, "Usuario o contraseÃ±a incorrectos.");
+            }
+
+            return View(model);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Logout()
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return RedirectToAction("Index", "Home");
+        }
+
+        // ===================== PERFIL PROPIO =====================
+
+        [Authorize]
+        public IActionResult Perfil()
+        {
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+            return View(usuario);
+        }
+
+        // ----- Editar datos personales -----
+        [Authorize]
+        [HttpGet]
+        public IActionResult EditarDatos()
+        {
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+
+            var model = new EditarDatosViewModel
+            {
+                NombreCompleto = usuario.NombreCompleto,
+                Email = usuario.Email
+            };
+            return View(model);
+        }
+
+        [Authorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EditarDatos(EditarDatosViewModel model)
+        {
+            if (!ModelState.IsValid) return View(model);
+
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+
+            try
+            {
+                usuario.NombreCompleto = model.NombreCompleto;
+                usuario.Email = model.Email;
+                _repoUsuario.Modificacion(usuario);
+
+                // El nombre vive en la cookie de sesiÃ³n: se vuelve a emitir para que el navbar lo refleje.
+                await RefrescarSesionAsync(usuario);
+
+                TempData["Mensaje"] = "Datos personales actualizados correctamente.";
+                return RedirectToAction(nameof(Perfil));
+            }
+            catch
+            {
+                ViewBag.Error = "No se pudieron actualizar los datos (posible email duplicado).";
+                return View(model);
+            }
+        }
+
+        // ----- Cambiar contraseÃ±a -----
+        [Authorize]
+        [HttpGet]
+        public IActionResult CambiarClave()
+        {
+            return View();
+        }
+
+        [Authorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult CambiarClave(CambiarClaveViewModel model)
+        {
+            if (!ModelState.IsValid) return View(model);
+
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+
+            if (!PasswordHelper.VerificarHash(model.ClaveActual, usuario.PasswordHash))
+            {
+                ModelState.AddModelError("ClaveActual", "La contraseÃ±a actual es incorrecta.");
+                return View(model);
+            }
+
+            try
+            {
+                usuario.PasswordHash = PasswordHelper.GenerarHash(model.ClaveNueva);
+                _repoUsuario.Modificacion(usuario);
+
+                TempData["Mensaje"] = "ContraseÃ±a cambiada correctamente.";
+                return RedirectToAction(nameof(Perfil));
+            }
+            catch
+            {
+                ViewBag.Error = "No se pudo cambiar la contraseÃ±a.";
+                return View(model);
+            }
+        }
+
+        // ----- Cambiar Avatar -----
+        [Authorize]
+        [HttpGet]
+        public IActionResult CambiarAvatar()
+        {
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+            return View(usuario);
+        }
+
+        [Authorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult CambiarAvatar(IFormFile? AvatarFile)
+        {
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+
+            if (AvatarFile == null || AvatarFile.Length == 0)
+            {
+                ViewBag.Error = "DebÃ©s seleccionar una imagen.";
+                return View(usuario);
+            }
+
+            try
+            {
+                var ruta = GuardarAvatar(AvatarFile);
+                if (ruta == null)
+                {
+                    ViewBag.Error = "Formato o tamaÃ±o de imagen no vÃ¡lido (mÃ¡x 2MB, jpg/png/webp/gif).";
+                    return View(usuario);
+                }
+
+                // ReciÃ©n ahora que el nuevo se guardÃ³ bien, se borra el anterior.
+                EliminarArchivoSiExiste(usuario.Avatar);
+                usuario.Avatar = ruta;
+                _repoUsuario.Modificacion(usuario);
+
+                TempData["Mensaje"] = "Avatar actualizado correctamente.";
+                return RedirectToAction(nameof(Perfil));
+            }
+            catch (Exception ex)
+            {
+                ViewBag.Error = "Error al subir el avatar: " + ex.Message;
+                return View(usuario);
+            }
+        }
+
+        // ----- Eliminar Avatar -----
+        [Authorize]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult EliminarAvatar()
+        {
+            var usuario = ObtenerUsuarioActual();
+            if (usuario == null) return NotFound();
+
+            try
+            {
+                EliminarArchivoSiExiste(usuario.Avatar);
+                usuario.Avatar = null;
+                _repoUsuario.Modificacion(usuario);
+
+                TempData["Mensaje"] = "Avatar eliminado correctamente.";
+            }
+            catch
+            {
+                TempData["Error"] = "No se pudo eliminar el avatar.";
+            }
+
+            return RedirectToAction(nameof(Perfil));
+        }
+
+        // ===================== HELPERS =====================
+
+        private async Task RefrescarSesionAsync(Usuario usuario)
+        {
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, usuario.NombreCompleto),
+                new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()),
+                new Claim(ClaimTypes.Role, usuario.Rol)
+            };
+            var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+        }
+
+        private Usuario? ObtenerUsuarioActual()
+        {
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(idClaim, out int id)) return null;
+            return _repoUsuario.ObtenerPorId(id);
+        }
+
+        private string? GuardarAvatar(IFormFile archivo)
+        {
+            var extension = Path.GetExtension(archivo.FileName).ToLowerInvariant();
+            if (!ExtensionesPermitidas.Contains(extension) || archivo.Length > TamanioMaximoBytes)
+                return null;
+
+            var nombreArchivo = $"avatar_{Guid.NewGuid()}{extension}";
+            var carpeta = Path.Combine(_entorno.WebRootPath, "img", "avatars");
+
+            if (!Directory.Exists(carpeta))
+                Directory.CreateDirectory(carpeta);
+
+            var rutaFisica = Path.Combine(carpeta, nombreArchivo);
+            using (var stream = new FileStream(rutaFisica, FileMode.Create))
+            {
+                archivo.CopyTo(stream);
+            }
+
+            return $"/img/avatars/{nombreArchivo}";
+        }
+
+        private void EliminarArchivoSiExiste(string? rutaRelativa)
+        {
+            if (string.IsNullOrEmpty(rutaRelativa)) return;
+            if (!rutaRelativa.StartsWith("/img/avatars/", StringComparison.OrdinalIgnoreCase)) return;
+
+            var rutaFisica = Path.Combine(_entorno.WebRootPath, rutaRelativa.TrimStart('/'));
+            if (System.IO.File.Exists(rutaFisica))
+            {
+                System.IO.File.Delete(rutaFisica);
+            }
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\ClientesController.cs =====
+
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers
+{
+    [Authorize]
+    public class ClientesController : Controller
+    {
+        private readonly IRepositorioCliente _repositorioCliente;
+
+        public ClientesController(IRepositorioCliente repositorioCliente)
+        {
+            _repositorioCliente = repositorioCliente;
+        }
+
+        // GET: Clientes
+        public IActionResult Index(string? busqueda, int pagina = 1)
+        {
+            int registrosPorPagina = 10;
+            var clientes = _repositorioCliente.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioCliente.ObtenerTotalClientes(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+
+            return View(clientes);
+        }
+
+        // GET: Clientes/Create
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        // POST: Clientes/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Create(Cliente cliente)
+        {
+            if (ModelState.IsValid)
+            {
+                _repositorioCliente.Alta(cliente);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(cliente);
+        }
+
+        // GET: Clientes/Edit/5
+        public IActionResult Edit(int id)
+        {
+            var cliente = _repositorioCliente.ObtenerPorId(id);
+            if (cliente == null)
+            {
+                return NotFound();
+            }
+            return View(cliente);
+        }
+
+        // POST: Clientes/Edit/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Edit(int id, Cliente cliente)
+        {
+            if (id != cliente.IdCliente)
+            {
+                return NotFound();
+            }
+
+            if (ModelState.IsValid)
+            {
+                _repositorioCliente.Modificar(cliente);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(cliente);
+        }
+
+        // GET: Clientes/Delete/5
+        public IActionResult Delete(int id)
+        {
+            var cliente = _repositorioCliente.ObtenerPorId(id);
+            if (cliente == null)
+            {
+                return NotFound();
+            }
+            return View(cliente);
+        }
+
+        // POST: Clientes/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public IActionResult DeleteConfirmed(int id)
+        {
+            _repositorioCliente.Eliminar(id);
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\ComprobantesPagoController.cs =====
+
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers
+{
+    
+    [Authorize(Policy = "SoloAdmin")]
+public class ComprobantesPagoController : Controller
+    {
+        private readonly IRepositorioComprobantePago _repositorio;
+        private readonly IWebHostEnvironment _entorno;
+
+        private static readonly string[] ExtensionesPermitidas = { ".pdf", ".jpg", ".jpeg", ".png" };
+        private const long TamanioMaximoBytes = 5 * 1024 * 1024; // 5 MB
+
+        public ComprobantesPagoController(IRepositorioComprobantePago repositorio, IWebHostEnvironment entorno)
+        {
+            _repositorio = repositorio;
+            _entorno = entorno;
+        }
+
+        // GET: ComprobantesPago
+        public IActionResult Index(string? busqueda, int pagina = 1)
+        {
+            int registrosPorPagina = 10;
+            var comprobantes = _repositorio.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorio.ObtenerTotalComprobantes(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+
+            return View(comprobantes);
+        }
+
+        // GET: ComprobantesPago/Create
+        public IActionResult Create()
+        {
+            return View(new ComprobantePagoViewModel { FechaPago = DateTime.Today });
+        }
+
+        // POST: ComprobantesPago/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(ComprobantePagoViewModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                string rutaArchivo = model.ArchivoComprobante ?? "";
+
+                if (model.Archivo != null && model.Archivo.Length > 0)
+                {
+                    var resultado = await GuardarArchivo(model.Archivo);
+                    if (resultado != null)
+                    {
+                        ModelState.AddModelError("Archivo", resultado);
+                        return View(model);
+                    }
+                    rutaArchivo = await SubirArchivo(model.Archivo);
+                }
+
+                var comprobante = new ComprobantePago
+                {
+                    OrdenId = model.OrdenId,
+                    Monto = model.Monto,
+                    FechaPago = model.FechaPago,
+                    ArchivoComprobante = rutaArchivo,
+                    Estado = model.Estado,
+                    IdUsuarioCreacion = 1
+                };
+
+                _repositorio.Alta(comprobante);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(model);
+        }
+
+        // GET: ComprobantesPago/Edit/5
+        public IActionResult Edit(int id)
+        {
+            var comprobante = _repositorio.ObtenerPorId(id);
+            if (comprobante == null) return NotFound();
+
+            var model = new ComprobantePagoViewModel
+            {
+                IdComprobante = comprobante.IdComprobante,
+                OrdenId = comprobante.OrdenId,
+                Monto = comprobante.Monto,
+                FechaPago = comprobante.FechaPago,
+                ArchivoComprobante = comprobante.ArchivoComprobante,
+                Estado = comprobante.Estado
+            };
+            return View(model);
+        }
+
+        // POST: ComprobantesPago/Edit/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(int id, ComprobantePagoViewModel model)
+        {
+            if (id != model.IdComprobante) return NotFound();
+
+            if (ModelState.IsValid)
+            {
+                string rutaArchivo = model.ArchivoComprobante ?? "";
+
+                if (model.Archivo != null && model.Archivo.Length > 0)
+                {
+                    if (!string.IsNullOrEmpty(model.ArchivoComprobante))
+                    {
+                        EliminarArchivoSiExiste(model.ArchivoComprobante);
+                    }
+
+                    var resultado = await GuardarArchivo(model.Archivo);
+                    if (resultado != null)
+                    {
+                        ModelState.AddModelError("Archivo", resultado);
+                        return View(model);
+                    }
+                    rutaArchivo = await SubirArchivo(model.Archivo);
+                }
+
+                var comprobante = new ComprobantePago
+                {
+                    IdComprobante = model.IdComprobante,
+                    OrdenId = model.OrdenId,
+                    Monto = model.Monto,
+                    FechaPago = model.FechaPago,
+                    ArchivoComprobante = rutaArchivo,
+                    Estado = model.Estado,
+                    IdUsuarioCreacion = 1
+                };
+
+                _repositorio.Modificar(comprobante);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(model);
+        }
+
+        // GET: ComprobantesPago/Delete/5
+        public IActionResult Delete(int id)
+        {
+            var comprobante = _repositorio.ObtenerPorId(id);
+            if (comprobante == null) return NotFound();
+            return View(comprobante);
+        }
+
+        // POST: ComprobantesPago/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public IActionResult DeleteConfirmed(int id)
+        {
+            var comprobante = _repositorio.ObtenerPorId(id);
+            if (comprobante != null && !string.IsNullOrEmpty(comprobante.ArchivoComprobante))
+            {
+                EliminarArchivoSiExiste(comprobante.ArchivoComprobante);
+            }
+            _repositorio.Eliminar(id);
+            return RedirectToAction(nameof(Index));
+        }
+
+        private async Task<string?> GuardarArchivo(IFormFile archivo)
+        {
+            var extension = Path.GetExtension(archivo.FileName).ToLowerInvariant();
+            if (!ExtensionesPermitidas.Contains(extension))
+                return "Solo se permiten archivos PDF, JPG o PNG.";
+
+            if (archivo.Length > TamanioMaximoBytes)
+                return "El archivo no puede superar los 5 MB.";
+
+            return null;
+        }
+
+        private async Task<string> SubirArchivo(IFormFile archivo)
+        {
+            var uploadsFolder = Path.Combine(_entorno.WebRootPath, "uploads", "comprobantes");
+            Directory.CreateDirectory(uploadsFolder);
+
+            var nombreUnico = $"{Guid.NewGuid()}{Path.GetExtension(archivo.FileName)}";
+            var rutaCompleta = Path.Combine(uploadsFolder, nombreUnico);
+
+            using (var stream = new FileStream(rutaCompleta, FileMode.Create))
+            {
+                await archivo.CopyToAsync(stream);
+            }
+
+            return $"/uploads/comprobantes/{nombreUnico}";
+        }
+
+        private void EliminarArchivoSiExiste(string? rutaRelativa)
+        {
+            if (string.IsNullOrEmpty(rutaRelativa)) return;
+            if (!rutaRelativa.StartsWith("/uploads/comprobantes/", StringComparison.OrdinalIgnoreCase)) return;
+
+            var rutaFisica = Path.Combine(_entorno.WebRootPath, rutaRelativa.TrimStart('/'));
+            if (System.IO.File.Exists(rutaFisica))
+            {
+                System.IO.File.Delete(rutaFisica);
+            }
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\HomeController.cs =====
+
+
+using System.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers;
+
+public class HomeController : Controller
+{
+    public IActionResult Index()
+    {
+        return View();
+    }
+
+    public IActionResult Privacy()
+    {
+        return View();
+    }
+
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public IActionResult Error()
+    {
+        return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+    }
+}
+
+
+===== TallerApp.Web\Controllers\MecanicosController.cs =====
+
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers
+{
+    [Authorize]
+    public class MecanicosController : Controller
+    {
+        private readonly IRepositorioMecanico _repositorioMecanico;
+
+        public MecanicosController(IRepositorioMecanico repositorioMecanico)
+        {
+            _repositorioMecanico = repositorioMecanico;
+        }
+
+        // GET: Mecanicos
+        public IActionResult Index(string? busqueda, int pagina = 1)
+        {
+            int registrosPorPagina = 10;
+            var mecanicos = _repositorioMecanico.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioMecanico.ObtenerTotalMecanicos(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+
+            return View(mecanicos);
+        }
+
+        // GET: Mecanicos/Create
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        // POST: Mecanicos/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Create(Mecanico mecanico)
+        {
+            if (ModelState.IsValid)
+            {
+                _repositorioMecanico.Alta(mecanico);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(mecanico);
+        }
+
+        // GET: Mecanicos/Edit/5
+        public IActionResult Edit(int id)
+        {
+            var mecanico = _repositorioMecanico.ObtenerPorId(id);
+            if (mecanico == null)
+            {
+                return NotFound();
+            }
+            return View(mecanico);
+        }
+
+        // POST: Mecanicos/Edit/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Edit(int id, Mecanico mecanico)
+        {
+            if (id != mecanico.IdMecanico)
+            {
+                return NotFound();
+            }
+
+            if (ModelState.IsValid)
+            {
+                _repositorioMecanico.Modificar(mecanico);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(mecanico);
+        }
+
+        // GET: Mecanicos/Delete/5
+        public IActionResult Delete(int id)
+        {
+            var mecanico = _repositorioMecanico.ObtenerPorId(id);
+            if (mecanico == null)
+            {
+                return NotFound();
+            }
+            return View(mecanico);
+        }
+
+        // POST: Mecanicos/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public IActionResult DeleteConfirmed(int id)
+        {
+            _repositorioMecanico.Eliminar(id);
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\OrdenesController.cs =====
+
+
+using System.Linq;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+using System;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Controllers
+{
+    [Authorize]
+    public class OrdenesController : Controller
+    {
+        private readonly IRepositorioCliente _repoCliente;
+        private readonly IRepositorioVehiculo _repoVehiculo;
+        private readonly IRepositorioMecanico _repoMecanico;
+        private readonly IRepositorioRepuesto _repoRepuesto;
+        private readonly IRepositorioOrdenTrabajo _repoOrden;
+
+        public OrdenesController(
+            IRepositorioCliente repoCliente,
+            IRepositorioVehiculo repoVehiculo,
+            IRepositorioMecanico repoMecanico,
+            IRepositorioRepuesto repoRepuesto,
+            IRepositorioOrdenTrabajo repoOrden)
+        {
+            _repoCliente = repoCliente;
+            _repoVehiculo = repoVehiculo;
+            _repoMecanico = repoMecanico;
+            _repoRepuesto = repoRepuesto;
+            _repoOrden = repoOrden;
+        }
+
+        // GET: Ordenes/Create → Esta es la vista con Vue.js
+        
+        // GET: Ordenes (Lista de órdenes)
+        public IActionResult Index()
+        {
+            return View();
+        }
+
+        // GET: Ordenes/Create → Esta es la vista con Vue.js
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        // ========== Endpoints para Vue.js (GET) ==========
+
+        [HttpGet]
+public IActionResult GetClientes(string? busqueda = null)
+{
+    var clientes = _repoCliente.ObtenerTodos(1, 20, busqueda);
+    return Json(clientes);
+}
+
+        [HttpGet]
+        public IActionResult GetVehiculosPorCliente(int clienteId)
+        {
+            var vehiculos = _repoVehiculo.ObtenerPorCliente(clienteId);
+            return Json(vehiculos);
+        }
+
+        [HttpGet]
+public IActionResult GetMecanicos(string? busqueda = null)
+{
+    var mecanicos = _repoMecanico.ObtenerTodos(1, 20, busqueda);
+    return Json(mecanicos);
+}
+
+        [HttpGet]
+        public IActionResult GetRepuestos(string? busqueda = null)
+        {
+            var repuestos = _repoRepuesto.ObtenerTodos(1, 50, busqueda);
+            return Json(repuestos);
+        }
+
+        // ========== Endpoint para Guardar la Orden (POST) ==========
+
+        [HttpPost]
+        public IActionResult CrearOrden([FromBody] CrearOrdenViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                // 1. Mapear ViewModel a Entidad OrdenTrabajo
+                var orden = new OrdenTrabajo
+                {
+                    VehiculoId = model.VehiculoId,
+                    MecanicoId = model.MecanicoId,
+                    FechaIngreso = DateTime.Parse(model.FechaIngreso),
+                    FechaEntregaEstimada = string.IsNullOrEmpty(model.FechaEntregaEstimada) ? (DateTime?)null : DateTime.Parse(model.FechaEntregaEstimada),
+                    Estado = "Pendiente",
+                    DescripcionProblema = model.DescripcionProblema ?? "",
+                    Observaciones = model.Observaciones ?? "",
+                    IdUsuarioCreacion = 1 // TODO: Obtener del usuario logueado
+                };
+
+                // 2. Mapear lista de repuestos
+                var detalles = new List<OrdenRepuesto>();
+                if (model.Repuestos != null)
+                {
+                    foreach (var item in model.Repuestos)
+                    {
+                        detalles.Add(new OrdenRepuesto
+                        {
+                            RepuestoId = item.RepuestoId,
+                            Cantidad = item.Cantidad,
+                            PrecioUnitario = item.PrecioUnitario
+                        });
+                    }
+                }
+
+                // 3. Ejecutar transacción en el repositorio
+                int nuevaOrdenId = _repoOrden.CrearOrdenConRepuestos(orden, detalles);
+
+                return Json(new { success = true, idOrden = nuevaOrdenId, mensaje = "Orden creada exitosamente" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, mensaje = "Error al crear la orden: " + ex.Message });
+            }
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\RepuestosController.cs =====
+
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers
+{
+    [Authorize]
+    public class RepuestosController : Controller
+    {
+        private readonly IRepositorioRepuesto _repositorioRepuesto;
+
+        public RepuestosController(IRepositorioRepuesto repositorioRepuesto)
+        {
+            _repositorioRepuesto = repositorioRepuesto;
+        }
+
+        // GET: Repuestos
+        public IActionResult Index(string? busqueda, int pagina = 1)
+        {
+            int registrosPorPagina = 10;
+            var repuestos = _repositorioRepuesto.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioRepuesto.ObtenerTotalRepuestos(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+
+            return View(repuestos);
+        }
+
+        // GET: Repuestos/Create
+        public IActionResult Create()
+        {
+            return View();
+        }
+
+        // POST: Repuestos/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Create(Repuesto repuesto)
+        {
+            if (ModelState.IsValid)
+            {
+                _repositorioRepuesto.Alta(repuesto);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(repuesto);
+        }
+
+        // GET: Repuestos/Edit/5
+        public IActionResult Edit(int id)
+        {
+            var repuesto = _repositorioRepuesto.ObtenerPorId(id);
+            if (repuesto == null)
+            {
+                return NotFound();
+            }
+            return View(repuesto);
+        }
+
+        // POST: Repuestos/Edit/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Edit(int id, Repuesto repuesto)
+        {
+            if (id != repuesto.IdRepuesto)
+            {
+                return NotFound();
+            }
+
+            if (ModelState.IsValid)
+            {
+                _repositorioRepuesto.Modificar(repuesto);
+                return RedirectToAction(nameof(Index));
+            }
+            return View(repuesto);
+        }
+
+        // GET: Repuestos/Delete/5
+        public IActionResult Delete(int id)
+        {
+            var repuesto = _repositorioRepuesto.ObtenerPorId(id);
+            if (repuesto == null)
+            {
+                return NotFound();
+            }
+            return View(repuesto);
+        }
+
+        // POST: Repuestos/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public IActionResult DeleteConfirmed(int id)
+        {
+            _repositorioRepuesto.Eliminar(id);
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+
+
+===== TallerApp.Web\Controllers\VehiculosController.cs =====
+
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Controllers
+{
+    [Authorize]
+    public class VehiculosController : Controller
+    {
+        private readonly IRepositorioVehiculo _repositorioVehiculo;
+        private readonly IRepositorioCliente _repositorioCliente;
+
+        public VehiculosController(IRepositorioVehiculo repositorioVehiculo, IRepositorioCliente repositorioCliente)
+        {
+            _repositorioVehiculo = repositorioVehiculo;
+            _repositorioCliente = repositorioCliente;
+        }
+
+        // GET: Vehiculos
+        public IActionResult Index(string? busqueda, int pagina = 1)
+        {
+            int registrosPorPagina = 10;
+            var vehiculos = _repositorioVehiculo.ObtenerTodos(pagina, registrosPorPagina, busqueda);
+            int totalRegistros = _repositorioVehiculo.ObtenerTotalVehiculos(busqueda);
+            int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
+
+            ViewBag.Busqueda = busqueda;
+            ViewBag.PaginaActual = pagina;
+            ViewBag.TotalPaginas = totalPaginas;
+            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, int.MaxValue);
+            
+            return View(vehiculos);
+        }
+
+        // GET: Vehiculos/Create
+        public IActionResult Create()
+        {
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto");
+            return View();
+        }
+
+        // POST: Vehiculos/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Create(Vehiculo vehiculo)
+        {
+            if (ModelState.IsValid)
+            {
+                _repositorioVehiculo.Alta(vehiculo);
+                return RedirectToAction(nameof(Index));
+            }
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            return View(vehiculo);
+        }
+
+        // GET: Vehiculos/Edit/5
+        public IActionResult Edit(int id)
+        {
+            var vehiculo = _repositorioVehiculo.ObtenerPorId(id);
+            if (vehiculo == null)
+            {
+                return NotFound();
+            }
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            return View(vehiculo);
+        }
+
+        // POST: Vehiculos/Edit/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult Edit(int id, Vehiculo vehiculo)
+        {
+            if (id != vehiculo.IdVehiculo)
+            {
+                return NotFound();
+            }
+
+            if (ModelState.IsValid)
+            {
+                _repositorioVehiculo.Modificar(vehiculo);
+                return RedirectToAction(nameof(Index));
+            }
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            return View(vehiculo);
+        }
+
+        // GET: Vehiculos/Delete/5
+        public IActionResult Delete(int id)
+        {
+            var vehiculo = _repositorioVehiculo.ObtenerPorId(id);
+            if (vehiculo == null)
+            {
+                return NotFound();
+            }
+            ViewBag.ClienteNombre = _repositorioCliente.ObtenerPorId(vehiculo.ClienteId)?.NombreCompleto;
+            return View(vehiculo);
+        }
+
+        // POST: Vehiculos/Delete/5
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public IActionResult DeleteConfirmed(int id)
+        {
+            _repositorioVehiculo.Eliminar(id);
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioCliente.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioCliente
+    {
+        List<Cliente> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalClientes(string? busqueda = null);
+        Cliente? ObtenerPorId(int id);
+        void Alta(Cliente cliente);
+        void Modificar(Cliente cliente);
+        void Eliminar(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioComprobantePago.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioComprobantePago
+    {
+        List<ComprobantePago> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalComprobantes(string? busqueda = null);
+        ComprobantePago? ObtenerPorId(int id);
+        void Alta(ComprobantePago comprobante);
+        void Modificar(ComprobantePago comprobante);
+        void Eliminar(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioMecanico.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioMecanico
+    {
+        List<Mecanico> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalMecanicos(string? busqueda = null);
+        Mecanico? ObtenerPorId(int id);
+        void Alta(Mecanico mecanico);
+        void Modificar(Mecanico mecanico);
+        void Eliminar(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioOrdenTrabajo.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioOrdenTrabajo
+    {
+        // Devuelve el ID de la nueva orden creada
+        int CrearOrdenConRepuestos(OrdenTrabajo orden, List<OrdenRepuesto> detalles);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioRepuesto.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioRepuesto
+    {
+        List<Repuesto> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalRepuestos(string? busqueda = null);
+        Repuesto? ObtenerPorId(int id);
+        void Alta(Repuesto repuesto);
+        void Modificar(Repuesto repuesto);
+        void Eliminar(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioUsuario.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+   namespace TallerApp.Web.Data
+{
+    public interface IRepositorioUsuario
+    {
+        List<Usuario> ObtenerTodos();
+        Usuario? ObtenerPorEmail(string email);
+        Usuario? ObtenerPorId(int id);
+        void Alta(Usuario usuario);
+        void Modificacion(Usuario usuario);
+        void Baja(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\IRepositorioVehiculo.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Data
+{
+    public interface IRepositorioVehiculo
+    {
+        List<Vehiculo> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
+        int ObtenerTotalVehiculos(string? busqueda = null);
+        Vehiculo? ObtenerPorId(int id);
+        List<Vehiculo> ObtenerPorCliente(int clienteId);
+        void Alta(Vehiculo vehiculo);
+        void Modificar(Vehiculo vehiculo);
+        void Eliminar(int id);
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioBase.cs =====
+
+
+   using Microsoft.Extensions.Configuration;
+   using MySqlConnector;
+
+   namespace TallerApp.Web.Data
+   {
+       public class RepositorioBase
+       {
+           private readonly IConfiguration _configuration;
+
+           public RepositorioBase(IConfiguration configuration)
+           {
+               _configuration = configuration;
+           }
+
+           protected MySqlConnection ObtenerConexion()
+           {
+               var connectionString = _configuration.GetConnectionString("DefaultConnection");
+               return new MySqlConnection(connectionString);
+           }
+       }
+   }
+
+
+===== TallerApp.Web\Data\RepositorioCliente.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioCliente : RepositorioBase, IRepositorioCliente
+    {
+        public RepositorioCliente(IConfiguration configuration) : base(configuration) { }
+
+        public List<Cliente> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
+        {
+            var lista = new List<Cliente>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT * FROM Clientes";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE NombreCompleto LIKE @busqueda OR DNI LIKE @busqueda OR Email LIKE @busqueda";
+            }
+            sql += " LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new Cliente {
+                    IdCliente = reader.GetInt32("IdCliente"),
+                    NombreCompleto = reader.GetString("NombreCompleto"),
+                    DNI = reader.GetString("DNI"),
+                    Telefono = reader.IsDBNull(reader.GetOrdinal("Telefono")) ? "" : reader.GetString("Telefono"),
+                    Email = reader.IsDBNull(reader.GetOrdinal("Email")) ? "" : reader.GetString("Email"),
+                    Direccion = reader.IsDBNull(reader.GetOrdinal("Direccion")) ? "" : reader.GetString("Direccion")
+                });
+            }
+            return lista;
+        }
+
+        public int ObtenerTotalClientes(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM Clientes";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE NombreCompleto LIKE @busqueda OR DNI LIKE @busqueda OR Email LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        public Cliente? ObtenerPorId(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM Clientes WHERE IdCliente = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return new Cliente {
+                    IdCliente = reader.GetInt32("IdCliente"),
+                    NombreCompleto = reader.GetString("NombreCompleto"),
+                    DNI = reader.GetString("DNI"),
+                    Telefono = reader.IsDBNull(reader.GetOrdinal("Telefono")) ? "" : reader.GetString("Telefono"),
+                    Email = reader.IsDBNull(reader.GetOrdinal("Email")) ? "" : reader.GetString("Email"),
+                    Direccion = reader.IsDBNull(reader.GetOrdinal("Direccion")) ? "" : reader.GetString("Direccion")
+                };
+            }
+            return null;
+        }
+
+        public Cliente? ObtenerPorCliente(int id)
+        {
+            return ObtenerPorId(id);
+        }
+
+        public void Alta(Cliente cliente)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("INSERT INTO Clientes (NombreCompleto, DNI, Telefono, Email, Direccion) VALUES (@nombre, @dni, @tel, @email, @dir)", conexion);
+            cmd.Parameters.AddWithValue("@nombre", cliente.NombreCompleto);
+            cmd.Parameters.AddWithValue("@dni", cliente.DNI);
+            cmd.Parameters.AddWithValue("@tel", (object)cliente.Telefono ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@email", (object)cliente.Email ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@dir", (object)cliente.Direccion ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Modificar(Cliente cliente)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("UPDATE Clientes SET NombreCompleto=@nombre, DNI=@dni, Telefono=@tel, Email=@email, Direccion=@dir WHERE IdCliente=@id", conexion);
+            cmd.Parameters.AddWithValue("@id", cliente.IdCliente);
+            cmd.Parameters.AddWithValue("@nombre", cliente.NombreCompleto);
+            cmd.Parameters.AddWithValue("@dni", cliente.DNI);
+            cmd.Parameters.AddWithValue("@tel", (object)cliente.Telefono ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@email", (object)cliente.Email ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@dir", (object)cliente.Direccion ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("DELETE FROM Clientes WHERE IdCliente = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioComprobantePago.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioComprobantePago : RepositorioBase, IRepositorioComprobantePago
+    {
+        public RepositorioComprobantePago(IConfiguration configuration) : base(configuration) { }
+
+        public List<ComprobantePago> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
+        {
+            var lista = new List<ComprobantePago>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT * FROM ComprobantesPago";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Estado LIKE @busqueda OR ArchivoComprobante LIKE @busqueda";
+            }
+            sql += " ORDER BY FechaPago DESC LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new ComprobantePago {
+                    IdComprobante = reader.GetInt32("IdComprobante"),
+                    OrdenId = reader.GetInt32("OrdenId"),
+                    Monto = reader.GetDecimal("Monto"),
+                    FechaPago = reader.GetDateTime("FechaPago"),
+                    ArchivoComprobante = reader.IsDBNull(reader.GetOrdinal("ArchivoComprobante")) ? "" : reader.GetString("ArchivoComprobante"),
+                    Estado = reader.GetString("Estado"),
+                    IdUsuarioCreacion = reader.GetInt32("IdUsuarioCreacion")
+                });
+            }
+            return lista;
+        }
+
+        public int ObtenerTotalComprobantes(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM ComprobantesPago";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Estado LIKE @busqueda OR ArchivoComprobante LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        public ComprobantePago? ObtenerPorId(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM ComprobantesPago WHERE IdComprobante = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return new ComprobantePago {
+                    IdComprobante = reader.GetInt32("IdComprobante"),
+                    OrdenId = reader.GetInt32("OrdenId"),
+                    Monto = reader.GetDecimal("Monto"),
+                    FechaPago = reader.GetDateTime("FechaPago"),
+                    ArchivoComprobante = reader.IsDBNull(reader.GetOrdinal("ArchivoComprobante")) ? "" : reader.GetString("ArchivoComprobante"),
+                    Estado = reader.GetString("Estado"),
+                    IdUsuarioCreacion = reader.GetInt32("IdUsuarioCreacion")
+                };
+            }
+            return null;
+        }
+
+        public void Alta(ComprobantePago comprobante)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("INSERT INTO ComprobantesPago (OrdenId, Monto, FechaPago, ArchivoComprobante, Estado, IdUsuarioCreacion) VALUES (@orden, @monto, @fecha, @archivo, @estado, @usuario)", conexion);
+            cmd.Parameters.AddWithValue("@orden", comprobante.OrdenId);
+            cmd.Parameters.AddWithValue("@monto", comprobante.Monto);
+            cmd.Parameters.AddWithValue("@fecha", comprobante.FechaPago);
+            cmd.Parameters.AddWithValue("@archivo", (object)comprobante.ArchivoComprobante ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@estado", comprobante.Estado);
+            cmd.Parameters.AddWithValue("@usuario", comprobante.IdUsuarioCreacion);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Modificar(ComprobantePago comprobante)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("UPDATE ComprobantesPago SET OrdenId=@orden, Monto=@monto, FechaPago=@fecha, ArchivoComprobante=@archivo, Estado=@estado, IdUsuarioCreacion=@usuario WHERE IdComprobante=@id", conexion);
+            cmd.Parameters.AddWithValue("@id", comprobante.IdComprobante);
+            cmd.Parameters.AddWithValue("@orden", comprobante.OrdenId);
+            cmd.Parameters.AddWithValue("@monto", comprobante.Monto);
+            cmd.Parameters.AddWithValue("@fecha", comprobante.FechaPago);
+            cmd.Parameters.AddWithValue("@archivo", (object)comprobante.ArchivoComprobante ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@estado", comprobante.Estado);
+            cmd.Parameters.AddWithValue("@usuario", comprobante.IdUsuarioCreacion);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("DELETE FROM ComprobantesPago WHERE IdComprobante = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioMecanico.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioMecanico : RepositorioBase, IRepositorioMecanico
+    {
+        public RepositorioMecanico(IConfiguration configuration) : base(configuration) { }
+
+        public List<Mecanico> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
+        {
+            var lista = new List<Mecanico>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT * FROM Mecanicos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE NombreCompleto LIKE @busqueda OR Matricula LIKE @busqueda OR Especialidad LIKE @busqueda";
+            }
+            sql += " LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new Mecanico {
+                    IdMecanico = reader.GetInt32("IdMecanico"),
+                    NombreCompleto = reader.GetString("NombreCompleto"),
+                    Matricula = reader.GetString("Matricula"),
+                    Especialidad = reader.IsDBNull(reader.GetOrdinal("Especialidad")) ? "" : reader.GetString("Especialidad"),
+                    Email = reader.IsDBNull(reader.GetOrdinal("Email")) ? "" : reader.GetString("Email"),
+                    Telefono = reader.IsDBNull(reader.GetOrdinal("Telefono")) ? "" : reader.GetString("Telefono")
+                });
+            }
+            return lista;
+        }
+
+        public int ObtenerTotalMecanicos(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM Mecanicos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE NombreCompleto LIKE @busqueda OR Matricula LIKE @busqueda OR Especialidad LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        public Mecanico? ObtenerPorId(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM Mecanicos WHERE IdMecanico = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return new Mecanico {
+                    IdMecanico = reader.GetInt32("IdMecanico"),
+                    NombreCompleto = reader.GetString("NombreCompleto"),
+                    Matricula = reader.GetString("Matricula"),
+                    Especialidad = reader.IsDBNull(reader.GetOrdinal("Especialidad")) ? "" : reader.GetString("Especialidad"),
+                    Email = reader.IsDBNull(reader.GetOrdinal("Email")) ? "" : reader.GetString("Email"),
+                    Telefono = reader.IsDBNull(reader.GetOrdinal("Telefono")) ? "" : reader.GetString("Telefono")
+                };
+            }
+            return null;
+        }
+
+        public void Alta(Mecanico mecanico)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("INSERT INTO Mecanicos (NombreCompleto, Matricula, Especialidad, Email, Telefono) VALUES (@nom, @mat, @esp, @ema, @tel)", conexion);
+            cmd.Parameters.AddWithValue("@nom", mecanico.NombreCompleto);
+            cmd.Parameters.AddWithValue("@mat", mecanico.Matricula);
+            cmd.Parameters.AddWithValue("@esp", (object)mecanico.Especialidad ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ema", (object)mecanico.Email ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@tel", (object)mecanico.Telefono ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Modificar(Mecanico mecanico)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("UPDATE Mecanicos SET NombreCompleto=@nom, Matricula=@mat, Especialidad=@esp, Email=@ema, Telefono=@tel WHERE IdMecanico=@id", conexion);
+            cmd.Parameters.AddWithValue("@id", mecanico.IdMecanico);
+            cmd.Parameters.AddWithValue("@nom", mecanico.NombreCompleto);
+            cmd.Parameters.AddWithValue("@mat", mecanico.Matricula);
+            cmd.Parameters.AddWithValue("@esp", (object)mecanico.Especialidad ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ema", (object)mecanico.Email ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@tel", (object)mecanico.Telefono ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("DELETE FROM Mecanicos WHERE IdMecanico = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioOrdenTrabajo.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioOrdenTrabajo : RepositorioBase, IRepositorioOrdenTrabajo
+    {
+        public RepositorioOrdenTrabajo(IConfiguration configuration) : base(configuration) { }
+
+        public int CrearOrdenConRepuestos(OrdenTrabajo orden, List<OrdenRepuesto> detalles)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            // Iniciamos una transacción para garantizar integridad
+            using var transaction = conexion.BeginTransaction();
+            
+            try
+            {
+                // 1. Insertar la Orden de Trabajo
+                string sqlOrden = @"INSERT INTO ordenestrabajo 
+                    (VehiculoId, MecanicoId, FechaIngreso, FechaEntregaEstimada, Estado, DescripcionProblema, Observaciones, IdUsuarioCreacion) 
+                    VALUES (@vehiculo, @mecanico, @fechaIngreso, @fechaEntrega, @estado, @descripcion, @observaciones, @usuario)";
+                
+                using var cmdOrden = new MySqlCommand(sqlOrden, conexion, transaction);
+                cmdOrden.Parameters.AddWithValue("@vehiculo", orden.VehiculoId);
+                cmdOrden.Parameters.AddWithValue("@mecanico", orden.MecanicoId);
+                cmdOrden.Parameters.AddWithValue("@fechaIngreso", orden.FechaIngreso);
+                cmdOrden.Parameters.AddWithValue("@fechaEntrega", (object)orden.FechaEntregaEstimada ?? DBNull.Value);
+                cmdOrden.Parameters.AddWithValue("@estado", orden.Estado);
+                cmdOrden.Parameters.AddWithValue("@descripcion", orden.DescripcionProblema);
+                cmdOrden.Parameters.AddWithValue("@observaciones", (object)orden.Observaciones ?? DBNull.Value);
+                cmdOrden.Parameters.AddWithValue("@usuario", orden.IdUsuarioCreacion);
+                
+                cmdOrden.ExecuteNonQuery();
+                
+                // Obtener el ID generado
+                cmdOrden.CommandText = "SELECT LAST_INSERT_ID();";
+                int nuevaOrdenId = Convert.ToInt32(cmdOrden.ExecuteScalar());
+
+                // 2. Insertar los detalles (Repuestos) y descontar stock
+                string sqlDetalle = @"INSERT INTO OrdenRepuesto (OrdenId, RepuestoId, Cantidad, PrecioUnitario) 
+                                      VALUES (@ordenId, @repuestoId, @cantidad, @precio)";
+                
+                string sqlStock = "UPDATE Repuestos SET Stock = Stock - @cantidad WHERE IdRepuesto = @repuestoId";
+
+                foreach (var detalle in detalles)
+                {
+                    using var cmdDetalle = new MySqlCommand(sqlDetalle, conexion, transaction);
+                    cmdDetalle.Parameters.AddWithValue("@ordenId", nuevaOrdenId);
+                    cmdDetalle.Parameters.AddWithValue("@repuestoId", detalle.RepuestoId);
+                    cmdDetalle.Parameters.AddWithValue("@cantidad", detalle.Cantidad);
+                    cmdDetalle.Parameters.AddWithValue("@precio", detalle.PrecioUnitario);
+                    cmdDetalle.ExecuteNonQuery();
+
+                    // Descontar del stock
+                    using var cmdStock = new MySqlCommand(sqlStock, conexion, transaction);
+                    cmdStock.Parameters.AddWithValue("@cantidad", detalle.Cantidad);
+                    cmdStock.Parameters.AddWithValue("@repuestoId", detalle.RepuestoId);
+                    cmdStock.ExecuteNonQuery();
+                }
+
+                // 3. Confirmar la transacción
+                transaction.Commit();
+                return nuevaOrdenId;
+            }
+            catch
+            {
+                // Si algo falla, deshacer todo
+                transaction.Rollback();
+                throw;
+            }
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioRepuesto.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioRepuesto : RepositorioBase, IRepositorioRepuesto
+    {
+        public RepositorioRepuesto(IConfiguration configuration) : base(configuration) { }
+
+        public List<Repuesto> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
+        {
+            var lista = new List<Repuesto>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT * FROM Repuestos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Nombre LIKE @busqueda OR Codigo LIKE @busqueda";
+            }
+            sql += " LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new Repuesto {
+                    IdRepuesto = reader.GetInt32("IdRepuesto"),
+                    Nombre = reader.GetString("Nombre"),
+                    Codigo = reader.GetString("Codigo"),
+                    Precio = reader.GetDecimal("Precio"),
+                    Stock = reader.GetInt32("Stock"),
+                    Foto = reader.IsDBNull(reader.GetOrdinal("Foto")) ? "" : reader.GetString("Foto")
+                });
+            }
+            return lista;
+        }
+
+        public int ObtenerTotalRepuestos(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM Repuestos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Nombre LIKE @busqueda OR Codigo LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        public Repuesto? ObtenerPorId(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM Repuestos WHERE IdRepuesto = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return new Repuesto {
+                    IdRepuesto = reader.GetInt32("IdRepuesto"),
+                    Nombre = reader.GetString("Nombre"),
+                    Codigo = reader.GetString("Codigo"),
+                    Precio = reader.GetDecimal("Precio"),
+                    Stock = reader.GetInt32("Stock"),
+                    Foto = reader.IsDBNull(reader.GetOrdinal("Foto")) ? "" : reader.GetString("Foto")
+                };
+            }
+            return null;
+        }
+
+        public void Alta(Repuesto repuesto)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("INSERT INTO Repuestos (Nombre, Codigo, Precio, Stock, Foto) VALUES (@nom, @cod, @pre, @sto, @foto)", conexion);
+            cmd.Parameters.AddWithValue("@nom", repuesto.Nombre);
+            cmd.Parameters.AddWithValue("@cod", repuesto.Codigo);
+            cmd.Parameters.AddWithValue("@pre", repuesto.Precio);
+            cmd.Parameters.AddWithValue("@sto", repuesto.Stock);
+            cmd.Parameters.AddWithValue("@foto", (object)repuesto.Foto ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Modificar(Repuesto repuesto)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("UPDATE Repuestos SET Nombre=@nom, Codigo=@cod, Precio=@pre, Stock=@sto, Foto=@foto WHERE IdRepuesto=@id", conexion);
+            cmd.Parameters.AddWithValue("@id", repuesto.IdRepuesto);
+            cmd.Parameters.AddWithValue("@nom", repuesto.Nombre);
+            cmd.Parameters.AddWithValue("@cod", repuesto.Codigo);
+            cmd.Parameters.AddWithValue("@pre", repuesto.Precio);
+            cmd.Parameters.AddWithValue("@sto", repuesto.Stock);
+            cmd.Parameters.AddWithValue("@foto", (object)repuesto.Foto ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("DELETE FROM Repuestos WHERE IdRepuesto = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioUsuario.cs =====
+
+
+using TallerApp.Web.Models;
+using System.Collections.Generic;
+using Microsoft.Extensions.Configuration;
+using MySqlConnector;
+
+   namespace TallerApp.Web.Data
+{
+    public class RepositorioUsuario : RepositorioBase, IRepositorioUsuario
+    {
+        public RepositorioUsuario(IConfiguration configuration) : base(configuration)
+        {
+        }
+
+        public List<Usuario> ObtenerTodos()
+        {
+            var lista = new List<Usuario>();
+            using (var connection = ObtenerConexion())
+            {
+                var sql = "SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar FROM Usuarios;";
+                using (var command = new MySqlCommand(sql, connection))
+                {
+                    connection.Open();
+                    using (var reader = command.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            lista.Add(MapearUsuario(reader));
+                        }
+                    }
+                }
+            }
+            return lista;
+        }
+
+        public Usuario? ObtenerPorEmail(string email)
+        {
+            Usuario? u = null;
+            string sql = @"SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar
+                            FROM Usuarios
+                            WHERE Email = @email";
+
+            using (var connection = ObtenerConexion())
+            {
+                var command = new MySqlCommand(sql, connection);
+                command.Parameters.AddWithValue("@email", email);
+
+                connection.Open();
+
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        u = MapearUsuario(reader);
+                    }
+                }
+            }
+            return u;
+        }
+
+        public Usuario? ObtenerPorId(int id)
+        {
+            Usuario? u = null;
+            string sql = @"SELECT IdUsuario, Email, PasswordHash, NombreCompleto, Rol, Avatar
+                            FROM Usuarios
+                            WHERE IdUsuario = @id";
+
+            using (var connection = ObtenerConexion())
+            {
+                var command = new MySqlCommand(sql, connection);
+                command.Parameters.AddWithValue("@id", id);
+
+                connection.Open();
+
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        u = MapearUsuario(reader);
+                    }
+                }
+            }
+            return u;
+        }
+
+        public void Alta(Usuario usuario)
+        {
+            using (var connection = ObtenerConexion())
+            {
+                var sql = @"INSERT INTO Usuarios (Email, PasswordHash, NombreCompleto, Rol, Avatar) 
+                            VALUES (@Email, @PasswordHash, @NombreCompleto, @Rol, @Avatar);";
+                using (var command = new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.AddWithValue("@Email", usuario.Email);
+                    command.Parameters.AddWithValue("@PasswordHash", usuario.PasswordHash);
+                    command.Parameters.AddWithValue("@NombreCompleto", usuario.NombreCompleto);
+                    command.Parameters.AddWithValue("@Rol", usuario.Rol);
+                    command.Parameters.AddWithValue("@Avatar", (object)usuario.Avatar ?? DBNull.Value);
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Modificacion(Usuario usuario)
+        {
+            using (var connection = ObtenerConexion())
+            {
+                var sql = @"UPDATE Usuarios SET Email = @Email, PasswordHash = @PasswordHash, 
+                            NombreCompleto = @NombreCompleto, Rol = @Rol, Avatar = @Avatar 
+                            WHERE IdUsuario = @IdUsuario;";
+                using (var command = new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.AddWithValue("@IdUsuario", usuario.IdUsuario);
+                    command.Parameters.AddWithValue("@Email", usuario.Email);
+                    command.Parameters.AddWithValue("@PasswordHash", usuario.PasswordHash);
+                    command.Parameters.AddWithValue("@NombreCompleto", usuario.NombreCompleto);
+                    command.Parameters.AddWithValue("@Rol", usuario.Rol);
+                    command.Parameters.AddWithValue("@Avatar", (object)usuario.Avatar ?? DBNull.Value);
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public void Baja(int id)
+        {
+            using (var connection = ObtenerConexion())
+            {
+                var sql = "DELETE FROM Usuarioss WHERE IdUsuario = @IdUsuario;";
+                using (var command = new MySqlCommand(sql, connection))
+                {
+                    command.Parameters.AddWithValue("@IdUsuario", id);
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private static Usuario MapearUsuario(MySqlDataReader reader)
+        {
+            return new Usuario
+            {
+                IdUsuario = reader.GetInt32("IdUsuario"),
+                Email = reader.GetString("Email"),
+                PasswordHash = reader.GetString("PasswordHash"),
+                NombreCompleto = reader.GetString("NombreCompleto"),
+                Rol = reader.GetString("Rol"),
+                Avatar = reader.IsDBNull(reader.GetOrdinal("Avatar")) ? null : reader.GetString("Avatar")
+            };
+        }
+    }
+}
+
+
+===== TallerApp.Web\Data\RepositorioVehiculo.cs =====
+
+
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using MySqlConnector;
+using TallerApp.Web.Models;
+
+namespace TallerApp.Web.Data
+{
+    public class RepositorioVehiculo : RepositorioBase, IRepositorioVehiculo
+    {
+        public RepositorioVehiculo(IConfiguration configuration) : base(configuration) { }
+
+        public List<Vehiculo> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null)
+        {
+            var lista = new List<Vehiculo>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT * FROM Vehiculos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Patente LIKE @busqueda OR Marca LIKE @busqueda OR Modelo LIKE @busqueda";
+            }
+            sql += " LIMIT @limite OFFSET @offset";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            cmd.Parameters.AddWithValue("@limite", registrosPorPagina);
+            cmd.Parameters.AddWithValue("@offset", (pagina - 1) * registrosPorPagina);
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new Vehiculo {
+                    IdVehiculo = reader.GetInt32("IdVehiculo"),
+                    Patente = reader.GetString("Patente"),
+                    Marca = reader.GetString("Marca"),
+                    Modelo = reader.GetString("Modelo"),
+                    Anio = reader.GetInt32("Anio"),
+                    Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? "" : reader.GetString("Color"),
+                    ClienteId = reader.GetInt32("ClienteId")
+                });
+            }
+            return lista;
+        }
+
+        public int ObtenerTotalVehiculos(string? busqueda = null)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            string sql = "SELECT COUNT(*) FROM Vehiculos";
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                sql += " WHERE Patente LIKE @busqueda OR Marca LIKE @busqueda OR Modelo LIKE @busqueda";
+            }
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            if (!string.IsNullOrEmpty(busqueda))
+            {
+                cmd.Parameters.AddWithValue("@busqueda", $"%{busqueda}%");
+            }
+            
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        public List<Vehiculo> ObtenerPorCliente(int clienteId)
+        {
+            var lista = new List<Vehiculo>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM Vehiculos WHERE ClienteId = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", clienteId);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                lista.Add(new Vehiculo {
+                    IdVehiculo = reader.GetInt32("IdVehiculo"),
+                    Patente = reader.GetString("Patente"),
+                    Marca = reader.GetString("Marca"),
+                    Modelo = reader.GetString("Modelo"),
+                    Anio = reader.GetInt32("Anio"),
+                    Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? "" : reader.GetString("Color"),
+                    ClienteId = reader.GetInt32("ClienteId")
+                });
+            }
+            return lista;
+        }
+
+        public Vehiculo? ObtenerPorId(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("SELECT * FROM Vehiculos WHERE IdVehiculo = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return new Vehiculo {
+                    IdVehiculo = reader.GetInt32("IdVehiculo"),
+                    Patente = reader.GetString("Patente"),
+                    Marca = reader.GetString("Marca"),
+                    Modelo = reader.GetString("Modelo"),
+                    Anio = reader.GetInt32("Anio"),
+                    Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? "" : reader.GetString("Color"),
+                    ClienteId = reader.GetInt32("ClienteId")
+                };
+            }
+            return null;
+        }
+
+        public void Alta(Vehiculo vehiculo)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("INSERT INTO Vehiculos (Patente, Marca, Modelo, Anio, Color, ClienteId) VALUES (@pat, @mar, @mod, @anio, @col, @cli)", conexion);
+            cmd.Parameters.AddWithValue("@pat", vehiculo.Patente);
+            cmd.Parameters.AddWithValue("@mar", vehiculo.Marca);
+            cmd.Parameters.AddWithValue("@mod", vehiculo.Modelo);
+            cmd.Parameters.AddWithValue("@anio", vehiculo.Anio);
+            cmd.Parameters.AddWithValue("@col", (object)vehiculo.Color ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@cli", vehiculo.ClienteId);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Modificar(Vehiculo vehiculo)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("UPDATE Vehiculos SET Patente=@pat, Marca=@mar, Modelo=@mod, Anio=@anio, Color=@col, ClienteId=@cli WHERE IdVehiculo=@id", conexion);
+            cmd.Parameters.AddWithValue("@id", vehiculo.IdVehiculo);
+            cmd.Parameters.AddWithValue("@pat", vehiculo.Patente);
+            cmd.Parameters.AddWithValue("@mar", vehiculo.Marca);
+            cmd.Parameters.AddWithValue("@mod", vehiculo.Modelo);
+            cmd.Parameters.AddWithValue("@anio", vehiculo.Anio);
+            cmd.Parameters.AddWithValue("@col", (object)vehiculo.Color ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@cli", vehiculo.ClienteId);
+            cmd.ExecuteNonQuery();
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            using var cmd = new MySqlCommand("DELETE FROM Vehiculos WHERE IdVehiculo = @id", conexion);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}
+
+
+===== TallerApp.Web\Models\CambiarClaveViewModel.cs =====
+
+
+using System.ComponentModel.DataAnnotations;
+
+namespace TallerApp.Web.Models
+{
+    public class CambiarClaveViewModel
+    {
+        [Required(ErrorMessage = "La contraseÃ±a actual es obligatoria")]
+        [DataType(DataType.Password)]
+        [Display(Name = "ContraseÃ±a Actual")]
+        public string ClaveActual { get; set; } = "";
+
+        [Required(ErrorMessage = "La nueva contraseÃ±a es obligatoria")]
+        [MinLength(6, ErrorMessage = "La contraseÃ±a debe tener al menos 6 caracteres")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Nueva ContraseÃ±a")]
+        public string ClaveNueva { get; set; } = "";
+
+        [Required(ErrorMessage = "DebÃ©s confirmar la nueva contraseÃ±a")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirmar Nueva ContraseÃ±a")]
+        [Compare("ClaveNueva", ErrorMessage = "Las contraseÃ±as no coinciden")]
+        public string ConfirmarClave { get; set; } = "";
+    }
+}
+
+
+===== TallerApp.Web\Models\Cliente.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class Cliente
+    {
+        public int IdCliente { get; set; }
+        public string NombreCompleto { get; set; } = "";
+        public string DNI { get; set; } = "";
+        public string Telefono { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Direccion { get; set; } = "";
+    }
+}
+
+
+===== TallerApp.Web\Models\ComprobantePago.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class ComprobantePago
+    {
+        public int IdComprobante { get; set; }
+        public int OrdenId { get; set; }
+        public decimal Monto { get; set; }
+        public DateTime FechaPago { get; set; }
+        public string ArchivoComprobante { get; set; } = "";
+        public string Estado { get; set; } = "Pendiente";
+        public int IdUsuarioCreacion { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\ComprobantePagoViewModel.cs =====
+
+
+using System.ComponentModel.DataAnnotations;
+
+namespace TallerApp.Web.Models
+{
+    public class ComprobantePagoViewModel
+    {
+        public int IdComprobante { get; set; }
+
+        [Required(ErrorMessage = "La orden es obligatoria.")]
+        [Display(Name = "Orden N°")]
+        public int OrdenId { get; set; }
+
+        [Required(ErrorMessage = "El monto es obligatorio.")]
+        [Range(0.01, double.MaxValue, ErrorMessage = "El monto debe ser mayor a 0.")]
+        [DisplayFormat(DataFormatString = "{0:N2}")]
+        public decimal Monto { get; set; }
+
+        [Required(ErrorMessage = "La fecha es obligatoria.")]
+        [DataType(DataType.Date)]
+        [Display(Name = "Fecha de Pago")]
+        public DateTime FechaPago { get; set; }
+
+        [Display(Name = "Archivo (PDF, JPG, PNG)")]
+        public IFormFile? Archivo { get; set; }
+
+        public string? ArchivoComprobante { get; set; }
+
+        [Required]
+        [StringLength(20)]
+        public string Estado { get; set; } = "Pendiente";
+    }
+}
+
+
+===== TallerApp.Web\Models\CrearOrdenViewModel.cs =====
+
+
+using System.Collections.Generic;
+
+namespace TallerApp.Web.Models
+{
+    public class CrearOrdenViewModel
+    {
+        public int VehiculoId { get; set; }
+        public int MecanicoId { get; set; }
+        public string FechaIngreso { get; set; }
+        public string? FechaEntregaEstimada { get; set; }
+        public string DescripcionProblema { get; set; } = "";
+        public string Observaciones { get; set; } = "";
+        
+        // Lista de repuestos que viene desde el array "items" de Vue.js
+        public List<DetalleOrdenDto> Repuestos { get; set; } = new List<DetalleOrdenDto>();
+    }
+
+    public class DetalleOrdenDto
+    {
+        public int RepuestoId { get; set; }
+        public int Cantidad { get; set; }
+        public decimal PrecioUnitario { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\EditarDatosViewModel.cs =====
+
+
+using System.ComponentModel.DataAnnotations;
+
+namespace TallerApp.Web.Models
+{
+    public class EditarDatosViewModel
+    {
+        [Required(ErrorMessage = "El nombre completo es obligatorio")]
+        [Display(Name = "Nombre Completo")]
+        public string NombreCompleto { get; set; } = "";
+
+        [Required(ErrorMessage = "El email es obligatorio")]
+        [EmailAddress(ErrorMessage = "El email no es vÃ¡lido")]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+    }
+}
+
+
+===== TallerApp.Web\Models\ErrorViewModel.cs =====
+
+
+namespace TallerApp.Web.Models;
+
+public class ErrorViewModel
+{
+    public string? RequestId { get; set; }
+
+    public bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+}
+
+
+===== TallerApp.Web\Models\LoginViewModel.cs =====
+
+
+using System.ComponentModel.DataAnnotations;
+
+namespace TallerApp.Web.Models
+{
+    public class LoginViewModel
+    {
+           [Required(ErrorMessage = "El usuario es obligatorio.")]
+   public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "La contraseÃ±a es obligatoria.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = string.Empty;
+
+        public string? ReturnUrl { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\Mecanico.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class Mecanico
+    {
+        public int IdMecanico { get; set; }
+        public string NombreCompleto { get; set; } = "";
+        public string Matricula { get; set; } = "";
+        public string Especialidad { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Telefono { get; set; } = "";
+    }
+}
+
+
+===== TallerApp.Web\Models\OrdenRepuesto.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class OrdenRepuesto
+    {
+        public int IdOrdenRepuesto { get; set; }
+        public int OrdenId { get; set; }
+        public int RepuestoId { get; set; }
+        public int Cantidad { get; set; }
+        public decimal PrecioUnitario { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\OrdenTrabajo.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class OrdenTrabajo
+    {
+        public int IdOrden { get; set; }
+        public int VehiculoId { get; set; }
+        public int MecanicoId { get; set; }
+        public DateTime FechaIngreso { get; set; }
+        public DateTime? FechaEntregaEstimada { get; set; }
+        public DateTime? FechaEntregaReal { get; set; }
+        public string Estado { get; set; } = "Pendiente";
+        public string DescripcionProblema { get; set; } = "";
+        public string Observaciones { get; set; } = "";
+        public int IdUsuarioCreacion { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\PasswordHelper.cs =====
+
+
+using System.Security.Cryptography;
+
+namespace TallerApp.Web.Models
+{
+    /// <summary>
+    /// Genera y verifica hashes de contraseÃ±a usando PBKDF2 (estÃ¡ndar, seguro).
+    /// No guarda la contraseÃ±a en texto plano, solo el hash + la sal.
+    /// </summary>
+    public static class PasswordHelper
+    {
+        private const int Iteraciones = 100_000;
+        private const int TamanioSal = 16;   // bytes
+        private const int TamanioHash = 32;  // bytes
+
+        // Genera un hash nuevo a partir de una contraseÃ±a en texto plano.
+        // Formato guardado: "iteraciones.saltEnBase64.hashEnBase64"
+        public static string GenerarHash(string password)
+        {
+            byte[] sal = RandomNumberGenerator.GetBytes(TamanioSal);
+            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(password, sal, Iteraciones, HashAlgorithmName.SHA256, TamanioHash);
+
+            return $"{Iteraciones}.{Convert.ToBase64String(sal)}.{Convert.ToBase64String(hash)}";
+        }
+
+        // Verifica que una contraseÃ±a en texto plano coincida con un hash almacenado.
+        public static bool VerificarHash(string password, string hashAlmacenado)
+        {
+            var partes = hashAlmacenado.Split('.', 3);
+            if (partes.Length != 3) return false;
+
+            if (!int.TryParse(partes[0], out int iteraciones)) return false;
+            byte[] sal, hashGuardado;
+            try
+            {
+                sal = Convert.FromBase64String(partes[1]);
+                hashGuardado = Convert.FromBase64String(partes[2]);
+            }
+            catch (FormatException)
+            {
+                return false; // hash corrupto o en formato viejo
+            }
+
+            byte[] hashIngresado = Rfc2898DeriveBytes.Pbkdf2(password, sal, iteraciones, HashAlgorithmName.SHA256, hashGuardado.Length);
+
+            return CryptographicOperations.FixedTimeEquals(hashIngresado, hashGuardado);
+        }
+    }
+}
+
+
+===== TallerApp.Web\Models\Repuesto.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class Repuesto
+    {
+        public int IdRepuesto { get; set; }
+        public string Nombre { get; set; } = "";
+        public string Codigo { get; set; } = "";
+        public decimal Precio { get; set; }
+        public int Stock { get; set; }
+        public string Foto { get; set; } = "";
+    }
+}
+
+
+===== TallerApp.Web\Models\Usuario.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class Usuario
+    {
+        public int IdUsuario { get; set; }
+        
+        public string Email { get; set; } = "";
+        
+        public string PasswordHash { get; set; } = "";
+        
+        public string NombreCompleto { get; set; } = "";
+        
+        public string Rol { get; set; } = ""; // "administrador" o "empleado"
+        
+        public string? Avatar { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Models\Vehiculo.cs =====
+
+
+namespace TallerApp.Web.Models
+{
+    public class Vehiculo
+    {
+        public int IdVehiculo { get; set; }
+        public string Patente { get; set; } = "";
+        public string Marca { get; set; } = "";
+        public string Modelo { get; set; } = "";
+        public int Anio { get; set; }
+        public string Color { get; set; } = "";
+        public int ClienteId { get; set; }
+    }
+}
+
+
+===== TallerApp.Web\Properties\launchSettings.json =====
+
+
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5063",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:7140;http://localhost:5063",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+
+
+===== TallerApp.Web\Views\Account\AccesoDenegado.cshtml =====
+
+
+@{
+    ViewData["Title"] = "Acceso denegado";
+}
+
+<h1>Acceso denegado</h1>
+<p>No tenÃ©s permiso para acceder a esta secciÃ³n.</p>
+<a asp-controller="Home" asp-action="Index" class="btn btn-secondary">Volver al inicio</a>
+
+
+===== TallerApp.Web\Views\Account\CambiarAvatar.cshtml =====
+
+
+@model TallerApp.Web.Models.Usuario
+@{
+    ViewData["Title"] = "Cambiar Avatar";
+}
+
+<h2>Cambiar Avatar</h2>
+
+@if (ViewBag.Error != null)
+{
+    <div class="alert alert-danger">@ViewBag.Error</div>
+}
+
+<div class="row mt-4">
+    <div class="col-md-4 text-center">
+        <p class="text-muted mb-2">Vista previa</p>
+        @if (!string.IsNullOrEmpty(Model.Avatar))
+        {
+            <img id="previewAvatar" src="@Model.Avatar" alt="Avatar" class="img-thumbnail rounded-circle mb-3"
+                 style="width:180px; height:180px; object-fit:cover;" />
+        }
+        else
+        {
+            <img id="previewAvatar" src="" alt="Avatar" class="img-thumbnail rounded-circle mb-3 d-none"
+                 style="width:180px; height:180px; object-fit:cover;" />
+            <div id="placeholderAvatar" class="bg-secondary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
+                 style="width:180px; height:180px; font-size:4rem;">
+                ðŸ‘¤
+            </div>
+        }
+    </div>
+
+    <div class="col-md-8">
+        <form asp-action="CambiarAvatar" method="post" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="AvatarFile" class="form-label">SeleccionÃ¡ una imagen</label>
+                <input type="file" id="AvatarFile" name="AvatarFile" class="form-control"
+                       accept=".jpg,.jpeg,.png,.webp,.gif,image/*" />
+                <div class="form-text">Formatos: jpg, png, webp o gif. TamaÃ±o mÃ¡ximo: 2 MB.</div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Guardar Avatar</button>
+            <a asp-action="Perfil" class="btn btn-secondary">Cancelar</a>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.getElementById(AvatarFile).addEventListener(change, function (e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            var preview = document.getElementById(previewAvatar);
+            var placeholder = document.getElementById(placeholderAvatar);
+            preview.src = URL.createObjectURL(file);
+            preview.classList.remove(d-none);
+            if (placeholder) placeholder.classList.add(d-none);
+        });
+    </script>
+}
+
+
+===== TallerApp.Web\Views\Account\CambiarClave.cshtml =====
+
+
+@model TallerApp.Web.Models.CambiarClaveViewModel
+@{
+    ViewData["Title"] = "Cambiar ContraseÃ±a";
+}
+
+<h2>Cambiar ContraseÃ±a</h2>
+
+@if (ViewBag.Error != null)
+{
+    <div class="alert alert-danger">@ViewBag.Error</div>
+}
+
+<form asp-action="CambiarClave" method="post">
+    <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+    <div class="mb-3">
+        <label asp-for="ClaveActual" class="form-label"></label>
+        <input asp-for="ClaveActual" class="form-control" />
+        <span asp-validation-for="ClaveActual" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="ClaveNueva" class="form-label"></label>
+        <input asp-for="ClaveNueva" class="form-control" />
+        <span asp-validation-for="ClaveNueva" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="ConfirmarClave" class="form-label"></label>
+        <input asp-for="ConfirmarClave" class="form-control" />
+        <span asp-validation-for="ConfirmarClave" class="text-danger"></span>
+    </div>
+
+    <button type="submit" class="btn btn-warning">Cambiar ContraseÃ±a</button>
+    <a asp-action="Perfil" class="btn btn-secondary">Cancelar</a>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
+
+
+===== TallerApp.Web\Views\Account\EditarDatos.cshtml =====
+
+
+@model TallerApp.Web.Models.EditarDatosViewModel
+@{
+    ViewData["Title"] = "Editar Datos Personales";
+}
+
+<h2>Editar Datos Personales</h2>
+
+@if (ViewBag.Error != null)
+{
+    <div class="alert alert-danger">@ViewBag.Error</div>
+}
+
+<form asp-action="EditarDatos" method="post">
+    <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+    <div class="mb-3">
+        <label asp-for="NombreCompleto" class="form-label"></label>
+        <input asp-for="NombreCompleto" class="form-control" />
+        <span asp-validation-for="NombreCompleto" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Email" class="form-label"></label>
+        <input asp-for="Email" class="form-control" />
+        <span asp-validation-for="Email" class="text-danger"></span>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+    <a asp-action="Perfil" class="btn btn-secondary">Cancelar</a>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
+
+
+===== TallerApp.Web\Views\Account\Login.cshtml =====
+
+
+@model TallerApp.Web.Models.LoginViewModel
+@{
+    ViewData["Title"] = "Iniciar Sesión";
+}
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white text-center">
+                <h4>ðŸ” Iniciar Sesión</h4>
+            </div>
+            <div class="card-body">
+                <form asp-action="Login" method="post">
+                    <input type="hidden" asp-for="ReturnUrl" />
+                    
+                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="Email" class="form-label">Usuario (Email)</label>
+                        <input asp-for="Email" class="form-control" placeholder="admin@tallerapp.com" />
+                        <span asp-validation-for="Email" class="text-danger"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Password" class="form-label">Contraseña</label>
+                        <input asp-for="Password" class="form-control" type="password" placeholder="••••••••" />
+                        <span asp-validation-for="Password" class="text-danger"></span>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Ingresar al Sistema</button>
+                    </div>
+                </form>
+                
+                <div class="mt-3 text-center">
+                    <small class="text-muted">
+                        <strong>Prueba:</strong> Usuario: <code>admin@tallerapp.com</code> | Contraseña: <code>Admin123</code>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
+
+
+===== TallerApp.Web\Views\Account\Perfil.cshtml =====
+
+
+@model TallerApp.Web.Models.Usuario
+@{
+    ViewData["Title"] = "Mi Perfil";
+}
+
+<h2>Mi Perfil</h2>
+
+@if (TempData["Mensaje"] != null)
+{
+    <div class="alert alert-success">@TempData["Mensaje"]</div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="alert alert-danger">@TempData["Error"]</div>
+}
+
+<div class="row mt-4">
+    <div class="col-md-4 text-center">
+        @if (!string.IsNullOrEmpty(Model.Avatar))
+        {
+            <img src="@Model.Avatar" alt="Avatar" class="img-thumbnail rounded-circle mb-3" style="width:180px; height:180px; object-fit:cover;" />
+        }
+        else
+        {
+            <div class="bg-secondary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style="width:180px; height:180px; font-size:4rem;">
+                ðŸ‘¤
+            </div>
+        }
+
+        <div class="d-grid gap-2">
+            <a asp-action="CambiarAvatar" class="btn btn-outline-primary btn-sm">Cambiar Avatar</a>
+            
+            @if (!string.IsNullOrEmpty(Model.Avatar))
+            {
+                <form asp-action="EliminarAvatar" method="post" onsubmit="return confirm('Â¿Eliminar el avatar?');">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Eliminar Avatar</button>
+                </form>
+            }
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">InformaciÃ³n Personal</h5>
+                <p><strong>Nombre:</strong> @Model.NombreCompleto</p>
+                <p><strong>Email:</strong> @Model.Email</p>
+                <p>
+                    <strong>Rol:</strong>
+                    <span class="badge @(Model.Rol == "administrador" ? "bg-danger" : "bg-primary")">
+                        @Model.Rol
+                    </span>
+                </p>
+
+                <hr />
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <a asp-action="EditarDatos" class="btn btn-primary">Editar Datos Personales</a>
+                    <a asp-action="CambiarClave" class="btn btn-warning">Cambiar ContraseÃ±a</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Clientes\Create.cshtml =====
+
+
+@model TallerApp.Web.Models.Cliente
+
+@{
+    ViewData["Title"] = "Nuevo Cliente";
+}
+
+<div class="container mt-4">
+    <h1>Nuevo Cliente</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Create">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group mb-3">
+                    <label asp-for="NombreCompleto" class="control-label"></label>
+                    <input asp-for="NombreCompleto" class="form-control" />
+                    <span asp-validation-for="NombreCompleto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="DNI" class="control-label"></label>
+                    <input asp-for="DNI" class="form-control" />
+                    <span asp-validation-for="DNI" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Telefono" class="control-label"></label>
+                    <input asp-for="Telefono" class="form-control" />
+                    <span asp-validation-for="Telefono" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Email" class="control-label"></label>
+                    <input asp-for="Email" class="form-control" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Direccion" class="control-label"></label>
+                    <input asp-for="Direccion" class="form-control" />
+                    <span asp-validation-for="Direccion" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Crear" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Clientes\Delete.cshtml =====
+
+
+@model TallerApp.Web.Models.Cliente
+
+@{
+    ViewData["Title"] = "Eliminar Cliente";
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Cliente</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este cliente?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">Nombre Completo</dt>
+        <dd class="col-sm-9">@Model.NombreCompleto</dd>
+        <dt class="col-sm-3">DNI</dt>
+        <dd class="col-sm-9">@Model.DNI</dd>
+        <dt class="col-sm-3">Teléfono</dt>
+        <dd class="col-sm-9">@Model.Telefono</dd>
+        <dt class="col-sm-3">Email</dt>
+        <dd class="col-sm-9">@Model.Email</dd>
+        <dt class="col-sm-3">Dirección</dt>
+        <dd class="col-sm-9">@Model.Direccion</dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdCliente" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
+
+
+===== TallerApp.Web\Views\Clientes\Edit.cshtml =====
+
+
+@model TallerApp.Web.Models.Cliente
+
+@{
+    ViewData["Title"] = "Editar Cliente";
+}
+
+<div class="container mt-4">
+    <h1>Editar Cliente</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Edit">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="IdCliente" />
+                <div class="form-group mb-3">
+                    <label asp-for="NombreCompleto" class="control-label"></label>
+                    <input asp-for="NombreCompleto" class="form-control" />
+                    <span asp-validation-for="NombreCompleto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="DNI" class="control-label"></label>
+                    <input asp-for="DNI" class="form-control" />
+                    <span asp-validation-for="DNI" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Telefono" class="control-label"></label>
+                    <input asp-for="Telefono" class="form-control" />
+                    <span asp-validation-for="Telefono" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Email" class="control-label"></label>
+                    <input asp-for="Email" class="form-control" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Direccion" class="control-label"></label>
+                    <input asp-for="Direccion" class="form-control" />
+                    <span asp-validation-for="Direccion" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Guardar" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Clientes\Index.cshtml =====
+
+
+@model IEnumerable<TallerApp.Web.Models.Cliente>
+
+@{
+    ViewData["Title"] = "Lista de Clientes";
+    string busqueda = ViewBag.Busqueda ?? "";
+    int paginaActual = ViewBag.PaginaActual ?? 1;
+    int totalPaginas = ViewBag.TotalPaginas ?? 1;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Clientes</h1>
+        <a asp-action="Create" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nuevo Cliente
+        </a>
+    </div>
+
+    <!-- Formulario de búsqueda -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-2">
+                <div class="col-md-8">
+                    <input type="text" name="busqueda" value="@busqueda" class="form-control" placeholder="Buscar por nombre, DNI o email..." />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                </div>
+                <div class="col-md-2">
+                    <a asp-action="Index" class="btn btn-secondary w-100">Limpiar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            @if (!Model.Any())
+            {
+                <div class="alert alert-info">No se encontraron clientes.</div>
+            }
+            else
+            {
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Nombre Completo</th>
+                            <th>DNI</th>
+                            <th>Teléfono</th>
+                            <th>Email</th>
+                            <th>Dirección</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            <tr>
+                                <td>@item.NombreCompleto</td>
+                                <td>@item.DNI</td>
+                                <td>@item.Telefono</td>
+                                <td>@item.Email</td>
+                                <td>@item.Direccion</td>
+                                <td>
+                                    <a asp-action="Edit" asp-route-id="@item.IdCliente" class="btn btn-sm btn-warning">Editar</a>
+                                    <a asp-action="Delete" asp-route-id="@item.IdCliente" class="btn btn-sm btn-danger">Eliminar</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <!-- Controles de paginación -->
+    @if (totalPaginas > 1)
+    {
+        <nav aria-label="Navegación de páginas" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(paginaActual <= 1 ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual - 1)" asp-route-busqueda="@busqueda">Anterior</a>
+                </li>
+                
+                @for (int i = 1; i <= totalPaginas; i++)
+                {
+                    <li class="page-item @(i == paginaActual ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-pagina="@i" asp-route-busqueda="@busqueda">@i</a>
+                    </li>
+                }
+                
+                <li class="page-item @(paginaActual >= totalPaginas ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual + 1)" asp-route-busqueda="@busqueda">Siguiente</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+
+===== TallerApp.Web\Views\ComprobantesPago\Create.cshtml =====
+
+
+@model TallerApp.Web.Models.ComprobantePagoViewModel
+
+@{
+    ViewData["Title"] = "Nuevo Comprobante de Pago";
+}
+
+<div class="container mt-4">
+    <h1>Nuevo Comprobante de Pago</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Create" method="post" enctype="multipart/form-data">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group mb-3">
+                    <label asp-for="OrdenId" class="control-label"></label>
+                    <input asp-for="OrdenId" class="form-control" type="number" />
+                    <span asp-validation-for="OrdenId" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Monto" class="control-label"></label>
+                    <input asp-for="Monto" class="form-control" type="number" step="0.01" />
+                    <span asp-validation-for="Monto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="FechaPago" class="control-label"></label>
+                    <input asp-for="FechaPago" class="form-control" type="date" />
+                    <span asp-validation-for="FechaPago" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Estado" class="control-label"></label>
+                    <select asp-for="Estado" class="form-control">
+                        <option value="Pendiente">Pendiente</option>
+                        <option value="Pagado">Pagado</option>
+                        <option value="Anulado">Anulado</option>
+                    </select>
+                    <span asp-validation-for="Estado" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Archivo" class="control-label"></label>
+                    <input asp-for="Archivo" class="form-control" type="file" accept=".pdf,.jpg,.jpeg,.png" />
+                    <small class="form-text text-muted">Formatos: PDF, JPG, PNG. Máximo 5 MB.</small>
+                    <span asp-validation-for="Archivo" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Crear" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
+
+
+===== TallerApp.Web\Views\ComprobantesPago\Delete.cshtml =====
+
+
+@model TallerApp.Web.Models.ComprobantePago
+
+@{
+    ViewData["Title"] = "Eliminar Comprobante de Pago";
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Comprobante de Pago</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este comprobante?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">ID</dt>
+        <dd class="col-sm-9">@Model.IdComprobante</dd>
+        <dt class="col-sm-3">Orden N°</dt>
+        <dd class="col-sm-9">@Model.OrdenId</dd>
+        <dt class="col-sm-3">Monto</dt>
+        <dd class="col-sm-9">$@Model.Monto.ToString("N2")</dd>
+        <dt class="col-sm-3">Fecha</dt>
+        <dd class="col-sm-9">@Model.FechaPago.ToString("dd/MM/yyyy")</dd>
+        <dt class="col-sm-3">Estado</dt>
+        <dd class="col-sm-9">@Model.Estado</dd>
+        <dt class="col-sm-3">Archivo</dt>
+        <dd class="col-sm-9">
+            @if (!string.IsNullOrEmpty(Model.ArchivoComprobante))
+            {
+                <a href="@Model.ArchivoComprobante" target="_blank">Ver archivo</a>
+            }
+            else
+            {
+                <span class="text-muted">Sin archivo</span>
+            }
+        </dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdComprobante" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
+
+
+===== TallerApp.Web\Views\ComprobantesPago\Edit.cshtml =====
+
+
+@model TallerApp.Web.Models.ComprobantePagoViewModel
+
+@{
+    ViewData["Title"] = "Editar Comprobante de Pago";
+}
+
+<div class="container mt-4">
+    <h1>Editar Comprobante de Pago</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Edit" method="post" enctype="multipart/form-data">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="IdComprobante" />
+                <div class="form-group mb-3">
+                    <label asp-for="OrdenId" class="control-label"></label>
+                    <input asp-for="OrdenId" class="form-control" type="number" />
+                    <span asp-validation-for="OrdenId" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Monto" class="control-label"></label>
+                    <input asp-for="Monto" class="form-control" type="number" step="0.01" />
+                    <span asp-validation-for="Monto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="FechaPago" class="control-label"></label>
+                    <input asp-for="FechaPago" class="form-control" type="date" />
+                    <span asp-validation-for="FechaPago" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Estado" class="control-label"></label>
+                    <select asp-for="Estado" class="form-control">
+                        <option value="Pendiente">Pendiente</option>
+                        <option value="Pagado">Pagado</option>
+                        <option value="Anulado">Anulado</option>
+                    </select>
+                    <span asp-validation-for="Estado" class="text-danger"></span>
+                </div>
+                @if (!string.IsNullOrEmpty(Model.ArchivoComprobante))
+                {
+                    <div class="form-group mb-3">
+                        <label class="control-label">Archivo actual:</label>
+                        <a href="@Model.ArchivoComprobante" target="_blank" class="btn btn-sm btn-outline-primary">Ver archivo actual</a>
+                        <small class="form-text text-muted">Si subes un nuevo archivo, reemplazará al actual.</small>
+                    </div>
+                }
+                <div class="form-group mb-3">
+                    <label asp-for="Archivo" class="control-label">Nuevo archivo (opcional)</label>
+                    <input asp-for="Archivo" class="form-control" type="file" accept=".pdf,.jpg,.jpeg,.png" />
+                    <small class="form-text text-muted">Formatos: PDF, JPG, PNG. Máximo 5 MB.</small>
+                    <span asp-validation-for="Archivo" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Guardar" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
+
+
+===== TallerApp.Web\Views\ComprobantesPago\Index.cshtml =====
+
+
+@model IEnumerable<TallerApp.Web.Models.ComprobantePago>
+
+@{
+    ViewData["Title"] = "Comprobantes de Pago";
+    string busqueda = ViewBag.Busqueda ?? "";
+    int paginaActual = ViewBag.PaginaActual ?? 1;
+    int totalPaginas = ViewBag.TotalPaginas ?? 1;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Comprobantes de Pago</h1>
+        <a asp-action="Create" class="btn btn-primary">Nuevo Comprobante</a>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-2">
+                <div class="col-md-8">
+                    <input type="text" name="busqueda" value="@busqueda" class="form-control" placeholder="Buscar por estado..." />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                </div>
+                <div class="col-md-2">
+                    <a asp-action="Index" class="btn btn-secondary w-100">Limpiar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            @if (!Model.Any())
+            {
+                <div class="alert alert-info">No se encontraron comprobantes.</div>
+            }
+            else
+            {
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>ID</th>
+                            <th>Orden N°</th>
+                            <th>Monto</th>
+                            <th>Fecha</th>
+                            <th>Estado</th>
+                            <th>Archivo</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            <tr>
+                                <td>@item.IdComprobante</td>
+                                <td>@item.OrdenId</td>
+                                <td>$@item.Monto.ToString("N2")</td>
+                                <td>@item.FechaPago.ToString("dd/MM/yyyy")</td>
+                                <td>
+                                    @if (item.Estado == "Pagado")
+                                    {
+                                        <span class="badge bg-success">@item.Estado</span>
+                                    }
+                                    else if (item.Estado == "Pendiente")
+                                    {
+                                        <span class="badge bg-warning text-dark">@item.Estado</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">@item.Estado</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(item.ArchivoComprobante))
+                                    {
+                                        <a href="@item.ArchivoComprobante" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">Sin archivo</span>
+                                    }
+                                </td>
+                                <td>
+                                    <a asp-action="Edit" asp-route-id="@item.IdComprobante" class="btn btn-sm btn-warning">Editar</a>
+                                    <a asp-action="Delete" asp-route-id="@item.IdComprobante" class="btn btn-sm btn-danger">Eliminar</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    @if (totalPaginas > 1)
+    {
+        <nav aria-label="Navegación de páginas" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(paginaActual <= 1 ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual - 1)" asp-route-busqueda="@busqueda">Anterior</a>
+                </li>
+                @for (int i = 1; i <= totalPaginas; i++)
+                {
+                    <li class="page-item @(i == paginaActual ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-pagina="@i" asp-route-busqueda="@busqueda">@i</a>
+                    </li>
+                }
+                <li class="page-item @(paginaActual >= totalPaginas ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual + 1)" asp-route-busqueda="@busqueda">Siguiente</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+
+===== TallerApp.Web\Views\Home\Index.cshtml =====
+
+
+@{
+    ViewData["Title"] = "Home Page";
+}
+
+<div class="text-center">
+    <h1 class="display-4">Welcome</h1>
+    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+</div>
+
+
+===== TallerApp.Web\Views\Home\Privacy.cshtml =====
+
+
+@{
+    ViewData["Title"] = "Privacy Policy";
+}
+<h1>@ViewData["Title"]</h1>
+
+<p>Use this page to detail your site's privacy policy.</p>
+
+
+===== TallerApp.Web\Views\Mecanicos\Create.cshtml =====
+
+
+@model TallerApp.Web.Models.Mecanico
+
+@{
+    ViewData["Title"] = "Nuevo Mecánico";
+}
+
+<div class="container mt-4">
+    <h1>Nuevo Mecánico</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Create">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group mb-3">
+                    <label asp-for="NombreCompleto" class="control-label"></label>
+                    <input asp-for="NombreCompleto" class="form-control" />
+                    <span asp-validation-for="NombreCompleto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Matricula" class="control-label"></label>
+                    <input asp-for="Matricula" class="form-control" />
+                    <span asp-validation-for="Matricula" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Especialidad" class="control-label"></label>
+                    <input asp-for="Especialidad" class="form-control" />
+                    <span asp-validation-for="Especialidad" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Email" class="control-label"></label>
+                    <input asp-for="Email" class="form-control" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Telefono" class="control-label"></label>
+                    <input asp-for="Telefono" class="form-control" />
+                    <span asp-validation-for="Telefono" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Crear" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Mecanicos\Delete.cshtml =====
+
+
+@model TallerApp.Web.Models.Mecanico
+
+@{
+    ViewData["Title"] = "Eliminar Mecánico";
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Mecánico</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este mecánico?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">Nombre Completo</dt>
+        <dd class="col-sm-9">@Model.NombreCompleto</dd>
+        <dt class="col-sm-3">Matrícula</dt>
+        <dd class="col-sm-9">@Model.Matricula</dd>
+        <dt class="col-sm-3">Especialidad</dt>
+        <dd class="col-sm-9">@Model.Especialidad</dd>
+        <dt class="col-sm-3">Email</dt>
+        <dd class="col-sm-9">@Model.Email</dd>
+        <dt class="col-sm-3">Teléfono</dt>
+        <dd class="col-sm-9">@Model.Telefono</dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdMecanico" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
+
+
+===== TallerApp.Web\Views\Mecanicos\Edit.cshtml =====
+
+
+@model TallerApp.Web.Models.Mecanico
+
+@{
+    ViewData["Title"] = "Editar Mecánico";
+}
+
+<div class="container mt-4">
+    <h1>Editar Mecánico</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Edit">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="IdMecanico" />
+                <div class="form-group mb-3">
+                    <label asp-for="NombreCompleto" class="control-label"></label>
+                    <input asp-for="NombreCompleto" class="form-control" />
+                    <span asp-validation-for="NombreCompleto" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Matricula" class="control-label"></label>
+                    <input asp-for="Matricula" class="form-control" />
+                    <span asp-validation-for="Matricula" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Especialidad" class="control-label"></label>
+                    <input asp-for="Especialidad" class="form-control" />
+                    <span asp-validation-for="Especialidad" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Email" class="control-label"></label>
+                    <input asp-for="Email" class="form-control" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Telefono" class="control-label"></label>
+                    <input asp-for="Telefono" class="form-control" />
+                    <span asp-validation-for="Telefono" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Guardar" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Mecanicos\Index.cshtml =====
+
+
+@model IEnumerable<TallerApp.Web.Models.Mecanico>
+
+@{
+    ViewData["Title"] = "Mecánicos";
+    string busqueda = ViewBag.Busqueda ?? "";
+    int paginaActual = ViewBag.PaginaActual ?? 1;
+    int totalPaginas = ViewBag.TotalPaginas ?? 1;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Mecánicos</h1>
+        <a asp-action="Create" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nuevo Mecánico
+        </a>
+    </div>
+
+    <!-- Formulario de búsqueda -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-2">
+                <div class="col-md-8">
+                    <input type="text" name="busqueda" value="@busqueda" class="form-control" placeholder="Buscar por nombre, matrícula o especialidad..." />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                </div>
+                <div class="col-md-2">
+                    <a asp-action="Index" class="btn btn-secondary w-100">Limpiar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            @if (!Model.Any())
+            {
+                <div class="alert alert-info">No se encontraron mecánicos.</div>
+            }
+            else
+            {
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Nombre Completo</th>
+                            <th>Matrícula</th>
+                            <th>Especialidad</th>
+                            <th>Email</th>
+                            <th>Teléfono</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            <tr>
+                                <td>@item.NombreCompleto</td>
+                                <td>@item.Matricula</td>
+                                <td>@item.Especialidad</td>
+                                <td>@item.Email</td>
+                                <td>@item.Telefono</td>
+                                <td>
+                                    <a asp-action="Edit" asp-route-id="@item.IdMecanico" class="btn btn-sm btn-warning">Editar</a>
+                                    <a asp-action="Delete" asp-route-id="@item.IdMecanico" class="btn btn-sm btn-danger">Eliminar</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <!-- Controles de paginación -->
+    @if (totalPaginas > 1)
+    {
+        <nav aria-label="Navegación de páginas" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(paginaActual <= 1 ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual - 1)" asp-route-busqueda="@busqueda">Anterior</a>
+                </li>
+                
+                @for (int i = 1; i <= totalPaginas; i++)
+                {
+                    <li class="page-item @(i == paginaActual ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-pagina="@i" asp-route-busqueda="@busqueda">@i</a>
+                    </li>
+                }
+                
+                <li class="page-item @(paginaActual >= totalPaginas ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual + 1)" asp-route-busqueda="@busqueda">Siguiente</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+
+===== TallerApp.Web\Views\Ordenes\Create.cshtml =====
+
+
+@{
+    ViewData["Title"] = "Nueva Orden de Trabajo";
+}
+
+<div id="app" class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Nueva Orden de Trabajo</h2>
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </div>
+
+    <div class="card shadow">
+        <div class="card-body">
+
+            <!-- Cliente con bÃºsqueda asÃ­ncrona -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">Cliente</label>
+                    <input type="text" class="form-control mb-2" v-model="busquedaCliente" 
+                           @@input="buscarClientes" placeholder="Buscar cliente por nombre o DNI...">
+                    <select class="form-select" v-model="clienteId" @@change="cargarVehiculos">
+                        <option value="">Seleccione un cliente...</option>
+                        <option v-for="c in clientes" :value="c.idCliente">
+                            {{ c.nombreCompleto }} ({{ c.dni }})
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">VehÃ­culo</label>
+                    <select class="form-select" v-model="vehiculoId" :disabled="!clienteId">
+                        <option value="">Seleccione un vehÃ­culo...</option>
+                        <option v-for="v in vehiculos" :value="v.idVehiculo">
+                            {{ v.patente }} - {{ v.marca }} {{ v.modelo }} ({{ v.anio }})
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- MecÃ¡nico con bÃºsqueda asÃ­ncrona -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">MecÃ¡nico</label>
+                    <input type="text" class="form-control mb-2" v-model="busquedaMecanico" 
+                           @@input="buscarMecanicos" placeholder="Buscar mecÃ¡nico por nombre o matrÃ­cula...">
+                    <select class="form-select" v-model="mecanicoId">
+                        <option value="">Seleccione un mecÃ¡nico...</option>
+                        <option v-for="m in mecanicos" :value="m.idMecanico">
+                            {{ m.nombreCompleto }} - {{ m.especialidad }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Fecha de Ingreso</label>
+                    <input type="date" class="form-control" v-model="fechaIngreso">
+                </div>
+            </div>
+
+            <!-- DescripciÃ³n -->
+            <div class="mb-3">
+                <label class="form-label">DescripciÃ³n del Problema</label>
+                <textarea class="form-control" rows="3" v-model="descripcionProblema"
+                          placeholder="Describa el problema del vehÃ­culo..."></textarea>
+            </div>
+
+            <hr>
+
+            <!-- SecciÃ³n de Repuestos -->
+            <h5 class="mb-3">Repuestos</h5>
+
+            <div class="row mb-3">
+                <div class="col-md-8">
+                    <input type="text" class="form-control" v-model="busquedaRepuesto"
+                           @@input="buscarRepuestos" placeholder="Buscar repuesto por nombre o cÃ³digo...">
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" v-model="repuestoSeleccionado">
+                        <option value="">Seleccione un repuesto...</option>
+                        <option v-for="r in repuestosFiltrados" :value="r">
+                            {{ r.nombre }} ({{ r.codigo }}) - ${{ r.precio }} - Stock: {{ r.stock }}
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <button class="btn btn-success" @@click="agregarRepuesto" :disabled="!repuestoSeleccionado">
+                    + Agregar Repuesto
+                </button>
+            </div>
+
+            <!-- Tabla de repuestos agregados -->
+            <div class="table-responsive" v-if="items.length > 0">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Repuesto</th>
+                            <th>CÃ³digo</th>
+                            <th width="120">Cantidad</th>
+                            <th>Precio Unit.</th>
+                            <th>Subtotal</th>
+                            <th width="80"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(item, index) in items" :key="index">
+                            <td>{{ item.nombre }}</td>
+                            <td>{{ item.codigo }}</td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm"
+                                       v-model.number="item.cantidad" min="1" @@change="calcularTotales">
+                            </td>
+                            <td>${{ item.precioUnitario.toFixed(2) }}</td>
+                            <td>${{ (item.cantidad * item.precioUnitario).toFixed(2) }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" @@click="eliminarItem(index)">X</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-secondary">
+                            <td colspan="4" class="text-end"><strong>TOTAL:</strong></td>
+                            <td colspan="2"><strong>${{ total.toFixed(2) }}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <div v-else class="alert alert-info">
+                No hay repuestos agregados todavÃ­a.
+            </div>
+
+            <hr>
+
+            <!-- Observaciones -->
+            <div class="mb-3">
+                <label class="form-label">Observaciones</label>
+                <textarea class="form-control" rows="2" v-model="observaciones"></textarea>
+            </div>
+
+            <!-- BotÃ³n Guardar -->
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-primary btn-lg" @@click="guardarOrden" :disabled="guardando">
+                    <span v-if="guardando">Guardando...</span>
+                    <span v-else>Guardar Orden de Trabajo</span>
+                </button>
+            </div>
+
+            <!-- Mensajes -->
+            <div v-if="mensaje" class="alert mt-3" :class="mensajeExito ? 'alert-success' : 'alert-danger'">
+                {{ mensaje }}
+            </div>
+
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    // Datos principales
+                    clienteId: '',
+                    vehiculoId: '',
+                    mecanicoId: '',
+                    fechaIngreso: new Date().toISOString().split('T')[0],
+                    descripcionProblema: '',
+                    observaciones: '',
+
+                    // BÃºsqueda asÃ­ncrona
+                    busquedaCliente: '',
+                    busquedaMecanico: '',
+
+                    // Listas
+                    clientes: [],
+                    vehiculos: [],
+                    mecanicos: [],
+                    repuestosFiltrados: [],
+                    items: [],          // repuestos agregados a la orden
+
+                    // Auxiliares
+                    busquedaRepuesto: '',
+                    repuestoSeleccionado: null,
+                    total: 0,
+                    guardando: false,
+                    mensaje: '',
+                    mensajeExito: false
+                }
+            },
+            mounted() {
+                // Ya no cargamos todos los clientes y mecÃ¡nicos al inicio
+                // Se cargarÃ¡n bajo demanda con la bÃºsqueda
+            },
+            methods: {
+                async buscarClientes() {
+                    if (this.busquedaCliente.length < 2) { this.clientes = []; return; }
+                    const res = await fetch(`/Ordenes/GetClientes?busqueda=${encodeURIComponent(this.busquedaCliente)}`);
+                    this.clientes = await res.json();
+                },
+                async buscarMecanicos() {
+                    if (this.busquedaMecanico.length < 2) { this.mecanicos = []; return; }
+                    const res = await fetch(`/Ordenes/GetMecanicos?busqueda=${encodeURIComponent(this.busquedaMecanico)}`);
+                    this.mecanicos = await res.json();
+                },
+                async cargarVehiculos() {
+                    this.vehiculoId = '';
+                    this.vehiculos = [];
+                    if (!this.clienteId) return;
+
+                    const res = await fetch(`/Ordenes/GetVehiculosPorCliente?clienteId=${this.clienteId}`);
+                    this.vehiculos = await res.json();
+                },
+                async buscarRepuestos() {
+                    if (this.busquedaRepuesto.length < 2) {
+                        this.repuestosFiltrados = [];
+                        return;
+                    }
+                    const res = await fetch(`/Ordenes/GetRepuestos?busqueda=${encodeURIComponent(this.busquedaRepuesto)}`);
+                    this.repuestosFiltrados = await res.json();
+                },
+                agregarRepuesto() {
+                    if (!this.repuestoSeleccionado) return;
+
+                    // Evitar duplicados
+                    const existe = this.items.find(i => i.repuestoId === this.repuestoSeleccionado.idRepuesto);
+                    if (existe) {
+                        existe.cantidad++;
+                    } else {
+                        this.items.push({
+                            repuestoId: this.repuestoSeleccionado.idRepuesto,
+                            nombre: this.repuestoSeleccionado.nombre,
+                            codigo: this.repuestoSeleccionado.codigo,
+                            cantidad: 1,
+                            precioUnitario: this.repuestoSeleccionado.precio
+                        });
+                    }
+
+                    this.repuestoSeleccionado = null;
+                    this.busquedaRepuesto = '';
+                    this.repuestosFiltrados = [];
+                    this.calcularTotales();
+                },
+                eliminarItem(index) {
+                    this.items.splice(index, 1);
+                    this.calcularTotales();
+                },
+                calcularTotales() {
+                    this.total = this.items.reduce((sum, item) => {
+                        return sum + (item.cantidad * item.precioUnitario);
+                    }, 0);
+                },
+                async guardarOrden() {
+                    // Validaciones bÃ¡sicas
+                    if (!this.clienteId || !this.vehiculoId || !this.mecanicoId) {
+                        this.mensaje = 'Debe seleccionar Cliente, VehÃ­culo y MecÃ¡nico';
+                        this.mensajeExito = false;
+                        return;
+                    }
+
+                    this.guardando = true;
+                    this.mensaje = '';
+
+                    const orden = {
+                        vehiculoId: parseInt(this.vehiculoId),
+                        mecanicoId: parseInt(this.mecanicoId),
+                        fechaIngreso: this.fechaIngreso,
+                        descripcionProblema: this.descripcionProblema,
+                        observaciones: this.observaciones,
+                        estado: 'Pendiente',
+                        repuestos: this.items.map(i => ({
+                            repuestoId: i.repuestoId,
+                            cantidad: i.cantidad,
+                            precioUnitario: i.precioUnitario
+                        }))
+                    };
+
+                    try {
+                        const res = await fetch('/Ordenes/CrearOrden', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(orden)
+                        });
+
+                        if (res.ok) {
+                            this.mensaje = 'Orden guardada correctamente';
+                            this.mensajeExito = true;
+
+                            // Limpiar formulario
+                            setTimeout(() => {
+                                window.location.href = '/Ordenes';
+                            }, 1500);
+                        } else {
+                            const error = await res.text();
+                            this.mensaje = 'Error al guardar: ' + error;
+                            this.mensajeExito = false;
+                        }
+                    } catch (error) {
+                        this.mensaje = 'Error de conexiÃ³n: ' + error.message;
+                        this.mensajeExito = false;
+                    } finally {
+                        this.guardando = false;
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+}
+
+
+===== TallerApp.Web\Views\Ordenes\Index.cshtml =====
+
+
+@{
+    ViewData["Title"] = "Órdenes de Trabajo";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Órdenes de Trabajo</h2>
+        <a asp-action="Create" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nueva Orden
+        </a>
+    </div>
+
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> 
+        Aquí se mostrará la lista de órdenes. (Próximamente con paginado y filtros)
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <p class="mb-0">Las órdenes creadas se mostrarán en esta tabla.</p>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Repuestos\Create.cshtml =====
+
+
+@model TallerApp.Web.Models.Repuesto
+
+@{
+    ViewData["Title"] = "Nuevo Repuesto";
+}
+
+<div class="container mt-4">
+    <h1>Nuevo Repuesto</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Create">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group mb-3">
+                    <label asp-for="Nombre" class="control-label"></label>
+                    <input asp-for="Nombre" class="form-control" />
+                    <span asp-validation-for="Nombre" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Codigo" class="control-label"></label>
+                    <input asp-for="Codigo" class="form-control" />
+                    <span asp-validation-for="Codigo" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Precio" class="control-label"></label>
+                    <input asp-for="Precio" type="number" step="0.01" class="form-control" />
+                    <span asp-validation-for="Precio" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Stock" class="control-label"></label>
+                    <input asp-for="Stock" type="number" class="form-control" />
+                    <span asp-validation-for="Stock" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Foto" class="control-label">Foto (URL o ruta)</label>
+                    <input asp-for="Foto" class="form-control" placeholder="Ej: /img/repuestos/filtro.jpg" />
+                    <span asp-validation-for="Foto" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Crear" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Repuestos\Delete.cshtml =====
+
+
+@model TallerApp.Web.Models.Repuesto
+
+@{
+    ViewData["Title"] = "Eliminar Repuesto";
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Repuesto</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este repuesto?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">Nombre</dt>
+        <dd class="col-sm-9">@Model.Nombre</dd>
+        <dt class="col-sm-3">Código</dt>
+        <dd class="col-sm-9">@Model.Codigo</dd>
+        <dt class="col-sm-3">Precio</dt>
+        <dd class="col-sm-9">$@Model.Precio.ToString("N2")</dd>
+        <dt class="col-sm-3">Stock</dt>
+        <dd class="col-sm-9">@Model.Stock</dd>
+        <dt class="col-sm-3">Foto</dt>
+        <dd class="col-sm-9">@(string.IsNullOrEmpty(Model.Foto) ? "Sin foto" : Model.Foto)</dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdRepuesto" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
+
+
+===== TallerApp.Web\Views\Repuestos\Edit.cshtml =====
+
+
+@model TallerApp.Web.Models.Repuesto
+
+@{
+    ViewData["Title"] = "Editar Repuesto";
+}
+
+<div class="container mt-4">
+    <h1>Editar Repuesto</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Edit">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="IdRepuesto" />
+                <div class="form-group mb-3">
+                    <label asp-for="Nombre" class="control-label"></label>
+                    <input asp-for="Nombre" class="form-control" />
+                    <span asp-validation-for="Nombre" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Codigo" class="control-label"></label>
+                    <input asp-for="Codigo" class="form-control" />
+                    <span asp-validation-for="Codigo" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Precio" class="control-label"></label>
+                    <input asp-for="Precio" type="number" step="0.01" class="form-control" />
+                    <span asp-validation-for="Precio" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Stock" class="control-label"></label>
+                    <input asp-for="Stock" type="number" class="form-control" />
+                    <span asp-validation-for="Stock" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Foto" class="control-label">Foto (URL o ruta)</label>
+                    <input asp-for="Foto" class="form-control" placeholder="Ej: /img/repuestos/filtro.jpg" />
+                    <span asp-validation-for="Foto" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Guardar" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Repuestos\Index.cshtml =====
+
+
+@model IEnumerable<TallerApp.Web.Models.Repuesto>
+
+@{
+    ViewData["Title"] = "Repuestos";
+    string busqueda = ViewBag.Busqueda ?? "";
+    int paginaActual = ViewBag.PaginaActual ?? 1;
+    int totalPaginas = ViewBag.TotalPaginas ?? 1;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Repuestos</h1>
+        <a asp-action="Create" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nuevo Repuesto
+        </a>
+    </div>
+
+    <!-- Formulario de búsqueda -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-2">
+                <div class="col-md-8">
+                    <input type="text" name="busqueda" value="@busqueda" class="form-control" placeholder="Buscar por nombre o código..." />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                </div>
+                <div class="col-md-2">
+                    <a asp-action="Index" class="btn btn-secondary w-100">Limpiar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            @if (!Model.Any())
+            {
+                <div class="alert alert-info">No se encontraron repuestos.</div>
+            }
+            else
+            {
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Código</th>
+                            <th>Precio</th>
+                            <th>Stock</th>
+                            <th>Foto</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            <tr>
+                                <td>@item.Nombre</td>
+                                <td>@item.Codigo</td>
+                                <td>$@item.Precio.ToString("N2")</td>
+                                <td>@item.Stock</td>
+                                <td>@(string.IsNullOrEmpty(item.Foto) ? "Sin foto" : item.Foto)</td>
+                                <td>
+                                    <a asp-action="Edit" asp-route-id="@item.IdRepuesto" class="btn btn-sm btn-warning">Editar</a>
+                                    <a asp-action="Delete" asp-route-id="@item.IdRepuesto" class="btn btn-sm btn-danger">Eliminar</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <!-- Controles de paginación -->
+    @if (totalPaginas > 1)
+    {
+        <nav aria-label="Navegación de páginas" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(paginaActual <= 1 ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual - 1)" asp-route-busqueda="@busqueda">Anterior</a>
+                </li>
+                
+                @for (int i = 1; i <= totalPaginas; i++)
+                {
+                    <li class="page-item @(i == paginaActual ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-pagina="@i" asp-route-busqueda="@busqueda">@i</a>
+                    </li>
+                }
+                
+                <li class="page-item @(paginaActual >= totalPaginas ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual + 1)" asp-route-busqueda="@busqueda">Siguiente</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+
+===== TallerApp.Web\Views\Shared\Error.cshtml =====
+
+
+@model ErrorViewModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<h1 class="text-danger">Error.</h1>
+<h2 class="text-danger">An error occurred while processing your request.</h2>
+
+@if (Model.ShowRequestId)
+{
+    <p>
+        <strong>Request ID:</strong> <code>@Model.RequestId</code>
+    </p>
+}
+
+<h3>Development Mode</h3>
+<p>
+    Swapping to <strong>Development</strong> environment will display more detailed information about the error that occurred.
+</p>
+<p>
+    <strong>The Development environment shouldn't be enabled for deployed applications.</strong>
+    It can result in displaying sensitive information from exceptions to end users.
+    For local debugging, enable the <strong>Development</strong> environment by setting the <strong>ASPNETCORE_ENVIRONMENT</strong> environment variable to <strong>Development</strong>
+    and restarting the app.
+</p>
+
+
+===== TallerApp.Web\Views\Shared\_Layout.cshtml =====
+
+
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - TallerApp</title>
+    <script type="importmap"></script>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/TallerApp.Web.styles.css" asp-append-version="true" />
+    <!-- Select2 CSS (base + tema Bootstrap 5) -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css"
+          rel="stylesheet" />
+</head>
+
+<body>
+    <header>
+        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
+            <div class="container-fluid">
+                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">TallerApp</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse"
+                        aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
+                    <ul class="navbar-nav flex-grow-1">
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Clientes" asp-action="Index">Clientes</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Vehiculos" asp-action="Index">Vehículos</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Mecanicos" asp-action="Index">Mecánicos</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Repuestos" asp-action="Index">Repuestos</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="Ordenes" asp-action="Index">Órdenes</a>
+        <li class="nav-item">
+        <a class="nav-link text-dark" asp-area="" asp-controller="ComprobantesPago" asp-action="Index">Comprobantes</a>
+</li>
+    </li>
+</ul>
+
+                    <!-- Sección de autenticación (login / perfil / logout) -->
+                    <ul class="navbar-nav">
+                        @if (User.Identity?.IsAuthenticated == true)
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-controller="Account" asp-action="Perfil">
+                                    👤 @User.Identity.Name
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline">
+                                    @Html.AntiForgeryToken()
+                                    <button type="submit" class="btn btn-link nav-link text-dark p-0">Cerrar Sesión</button>
+                                </form>
+                            </li>
+                        }
+                        else
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-controller="Account" asp-action="Login">🔐 Iniciar Sesión</a>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </header>
+    <div class="container">
+        <main role="main" class="pb-3">
+            @RenderBody()
+        </main>
+    </div>
+
+    <footer class="border-top footer text-muted">
+        <div class="container">
+            &copy; 2026 - TallerApp - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
+        </div>
+    </footer>
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+                    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+                    <script src="~/js/site.js" asp-append-version="true"></script>
+                    <!-- Select2 JS -->
+                    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+                    @await RenderSectionAsync("Scripts", required: false)
+                </body>
+
+            </html>
+
+
+===== TallerApp.Web\Views\Shared\_ValidationScriptsPartial.cshtml =====
+
+
+<script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
+<script src="~/lib/jquery-validation-unobtrusive/dist/jquery.validate.unobtrusive.min.js"></script>
+
+
+===== TallerApp.Web\Views\Vehiculos\Create.cshtml =====
+
+
+@model TallerApp.Web.Models.Vehiculo
+
+@{
+    ViewData["Title"] = "Nuevo Vehículo";
+}
+
+<div class="container mt-4">
+    <h1>Nuevo Vehículo</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Create">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <div class="form-group mb-3">
+                    <label asp-for="Patente" class="control-label"></label>
+                    <input asp-for="Patente" class="form-control" />
+                    <span asp-validation-for="Patente" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Marca" class="control-label"></label>
+                    <input asp-for="Marca" class="form-control" />
+                    <span asp-validation-for="Marca" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Modelo" class="control-label"></label>
+                    <input asp-for="Modelo" class="form-control" />
+                    <span asp-validation-for="Modelo" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Anio" class="control-label"></label>
+                    <input asp-for="Anio" type="number" class="form-control" />
+                    <span asp-validation-for="Anio" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Color" class="control-label"></label>
+                    <input asp-for="Color" class="form-control" />
+                    <span asp-validation-for="Color" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="ClienteId" class="control-label">Cliente</label>
+                    <select asp-for="ClienteId" class="form-select" asp-items="ViewBag.ClienteId">
+                        <option value="">-- Seleccione un cliente --</option>
+                    </select>
+                    <span asp-validation-for="ClienteId" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Crear" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Vehiculos\Delete.cshtml =====
+
+
+@model TallerApp.Web.Models.Vehiculo
+
+@{
+    ViewData["Title"] = "Eliminar Vehículo";
+    var clienteNombre = ViewBag.ClienteNombre as string;
+}
+
+<div class="container mt-4">
+    <h1>Eliminar Vehículo</h1>
+    <h3 class="text-danger">¿Está seguro que desea eliminar este vehículo?</h3>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-3">Patente</dt>
+        <dd class="col-sm-9">@Model.Patente</dd>
+        <dt class="col-sm-3">Marca</dt>
+        <dd class="col-sm-9">@Model.Marca</dd>
+        <dt class="col-sm-3">Modelo</dt>
+        <dd class="col-sm-9">@Model.Modelo</dd>
+        <dt class="col-sm-3">Año</dt>
+        <dd class="col-sm-9">@Model.Anio</dd>
+        <dt class="col-sm-3">Color</dt>
+        <dd class="col-sm-9">@Model.Color</dd>
+        <dt class="col-sm-3">Cliente</dt>
+        <dd class="col-sm-9">@clienteNombre</dd>
+    </dl>
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="IdVehiculo" />
+        <input type="submit" value="Eliminar" class="btn btn-danger" />
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </form>
+</div>
+
+
+===== TallerApp.Web\Views\Vehiculos\Edit.cshtml =====
+
+
+@model TallerApp.Web.Models.Vehiculo
+
+@{
+    ViewData["Title"] = "Editar Vehículo";
+}
+
+<div class="container mt-4">
+    <h1>Editar Vehículo</h1>
+    <hr />
+    <div class="row">
+        <div class="col-md-6">
+            <form asp-action="Edit">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="IdVehiculo" />
+                <div class="form-group mb-3">
+                    <label asp-for="Patente" class="control-label"></label>
+                    <input asp-for="Patente" class="form-control" />
+                    <span asp-validation-for="Patente" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Marca" class="control-label"></label>
+                    <input asp-for="Marca" class="form-control" />
+                    <span asp-validation-for="Marca" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Modelo" class="control-label"></label>
+                    <input asp-for="Modelo" class="form-control" />
+                    <span asp-validation-for="Modelo" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Anio" class="control-label"></label>
+                    <input asp-for="Anio" type="number" class="form-control" />
+                    <span asp-validation-for="Anio" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="Color" class="control-label"></label>
+                    <input asp-for="Color" class="form-control" />
+                    <span asp-validation-for="Color" class="text-danger"></span>
+                </div>
+                <div class="form-group mb-3">
+                    <label asp-for="ClienteId" class="control-label">Cliente</label>
+                    <select asp-for="ClienteId" class="form-select" asp-items="ViewBag.ClienteId">
+                        <option value="">-- Seleccione un cliente --</option>
+                    </select>
+                    <span asp-validation-for="ClienteId" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <input type="submit" value="Guardar" class="btn btn-primary" />
+                    <a asp-action="Index" class="btn btn-secondary">Volver</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+===== TallerApp.Web\Views\Vehiculos\Index.cshtml =====
+
+
+@model IEnumerable<TallerApp.Web.Models.Vehiculo>
+
+@{
+    ViewData["Title"] = "Vehículos";
+    var clientes = ViewBag.Clientes as List<TallerApp.Web.Models.Cliente>;
+    string busqueda = ViewBag.Busqueda ?? "";
+    int paginaActual = ViewBag.PaginaActual ?? 1;
+    int totalPaginas = ViewBag.TotalPaginas ?? 1;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Vehículos</h1>
+        <a asp-action="Create" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nuevo Vehículo
+        </a>
+    </div>
+
+    <!-- Formulario de búsqueda -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-2">
+                <div class="col-md-8">
+                    <input type="text" name="busqueda" value="@busqueda" class="form-control" placeholder="Buscar por patente, marca o modelo..." />
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                </div>
+                <div class="col-md-2">
+                    <a asp-action="Index" class="btn btn-secondary w-100">Limpiar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            @if (!Model.Any())
+            {
+                <div class="alert alert-info">No se encontraron vehículos.</div>
+            }
+            else
+            {
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Patente</th>
+                            <th>Marca</th>
+                            <th>Modelo</th>
+                            <th>Año</th>
+                            <th>Color</th>
+                            <th>Cliente</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            var cliente = clientes?.FirstOrDefault(c => c.IdCliente == item.ClienteId);
+                            <tr>
+                                <td>@item.Patente</td>
+                                <td>@item.Marca</td>
+                                <td>@item.Modelo</td>
+                                <td>@item.Anio</td>
+                                <td>@item.Color</td>
+                                <td>@(cliente?.NombreCompleto ?? "N/A")</td>
+                                <td>
+                                    <a asp-action="Edit" asp-route-id="@item.IdVehiculo" class="btn btn-sm btn-warning">Editar</a>
+                                    <a asp-action="Delete" asp-route-id="@item.IdVehiculo" class="btn btn-sm btn-danger">Eliminar</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <!-- Controles de paginación -->
+    @if (totalPaginas > 1)
+    {
+        <nav aria-label="Navegación de páginas" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(paginaActual <= 1 ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual - 1)" asp-route-busqueda="@busqueda">Anterior</a>
+                </li>
+                
+                @for (int i = 1; i <= totalPaginas; i++)
+                {
+                    <li class="page-item @(i == paginaActual ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-pagina="@i" asp-route-busqueda="@busqueda">@i</a>
+                    </li>
+                }
+                
+                <li class="page-item @(paginaActual >= totalPaginas ? "disabled" : "")">
+                    <a class="page-link" asp-action="Index" asp-route-pagina="@(paginaActual + 1)" asp-route-busqueda="@busqueda">Siguiente</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+
+===== TallerApp.Web\Views\_ViewImports.cshtml =====
+
+
+@using TallerApp.Web
+@using TallerApp.Web.Models
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+
+===== TallerApp.Web\Views\_ViewStart.cshtml =====
+
+
+@{
+    Layout = "_Layout";
+}
+
+
+===== TallerApp.Web\appsettings.Development.json =====
+
+
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+
+
+===== TallerApp.Web\appsettings.json =====
+
+
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Port=3306;Database=db_tallerapp;Uid=root;Pwd=;"
+  }
+}
+
+
+===== TallerApp.Web\Program.cs =====
+
+
+using TallerApp.Web.Data;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Agregar servicios al contenedor
+builder.Services.AddControllersWithViews();
+
+// Registrar los repositorios
+builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();
+builder.Services.AddScoped<IRepositorioCliente, RepositorioCliente>();
+builder.Services.AddScoped<IRepositorioVehiculo, RepositorioVehiculo>();
+builder.Services.AddScoped<IRepositorioMecanico, RepositorioMecanico>();
+builder.Services.AddScoped<IRepositorioRepuesto, RepositorioRepuesto>();
+builder.Services.AddScoped<IRepositorioOrdenTrabajo, RepositorioOrdenTrabajo>();
+builder.Services.AddScoped<IRepositorioComprobantePago, RepositorioComprobantePago>();
+
+// 1. Configurar Autorización (Políticas de Roles)
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SoloAdmin", policy => policy.RequireRole("Admin"));
+});
+
+// 2. Configurar autenticación por cookies
+builder.Services.AddAuthentication("Cookies")
+    .AddCookie("Cookies", options => {
+        options.LoginPath = "/Account/Login";
+        options.AccessDeniedPath = "/Account/AccesoDenegado";
+    });
+
+var app = builder.Build();
+
+// Configurar el pipeline de solicitud HTTP
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
+}
+
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
+
+app.Run();
+
+
+===== TallerApp.Web\TallerApp.Web.csproj =====
+
+
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+  </ItemGroup>
+
+</Project>
+
+
+===== README.md =====
+
+
+Â¡AhÃ­ estÃ¡ el problema! ðŸŽ¯ Solo copiaste **una parte** del README.md, no el completo. Por eso termina en la lÃ­nea 40.
+
+El README completo tiene **mÃ¡s de 80 lÃ­neas** e incluye todas estas secciones:
+- DescripciÃ³n General
+- TecnologÃ­as Utilizadas  
+- Credenciales de Prueba
+- Matriz de Evidencias (la tabla completa)
+- InstalaciÃ³n y EjecuciÃ³n Local
+- Estructura del Proyecto
+- Notas para la EvaluaciÃ³n
+
+---
+
+## ðŸ”§ **SOLUCIÃ“N: Copiar el README completo**
+
+Vas a hacer esto:
+
+1. **AbrÃ­ el archivo `README.md`** en VS Code (ya lo tenÃ©s abierto).
+2. **SeleccionÃ¡ TODO** el contenido (`Ctrl + A`).
+3. **Borralo completamente** (`Delete`).
+4. **CopiÃ¡ este bloque COMPLETO** (desde la lÃ­nea 1 hasta la Ãºltima):
+
+```markdown
+# ðŸš— TallerApp - Sistema de GestiÃ³n de Taller MecÃ¡nico
+
+## ðŸ“Œ DescripciÃ³n General
+Sistema web desarrollado en ASP.NET Core MVC para la gestiÃ³n integral de un taller mecÃ¡nico. Permite administrar clientes, vehÃ­culos, mecÃ¡nicos, repuestos, Ã³rdenes de trabajo y comprobantes de pago. Resuelve el problema de la gestiÃ³n manual de Ã³rdenes, el control de stock de repuestos en tiempo real y la trazabilidad de los pagos mediante comprobantes digitales.
+
+## ðŸ› ï¸ TecnologÃ­as Utilizadas
+- **Backend:** ASP.NET Core 10 MVC (C#)
+- **Base de Datos:** MySQL 8.0 (con MySqlConnector)
+- **Frontend DinÃ¡mico:** Vue.js 3 (CDN) para componentes reactivos sin recarga de pÃ¡gina
+- **AutenticaciÃ³n:** Cookies con manejo de Roles (Admin/Empleado)
+- **Control de Versiones:** Git + GitHub
+
+## ðŸ”‘ Credenciales de Prueba
+| Rol | Email | ContraseÃ±a |
+|-----|-------|------------|
+| Administrador | admin@tallerapp.com | Admin123 |
+
+---
+
+## ðŸ“‹ Matriz de Evidencias de Requerimientos MÃ­nimos
+
+| # | Requerimiento MÃ­nimo | Estado | Enlace al CÃ³digo / Controladores | Evidencia |
+|---|---|---|---|---|
+| 1 | **6+ Tablas y Relaciones (1:N y N:M)** | âœ… Cumplido | [Modelos](TallerApp.Web/Models/) (8 entidades). RelaciÃ³n N:M: `OrdenTrabajo` â†” `Repuestos` vÃ­a `OrdenRepuesto`. | Ver archivo `docs/der.png` |
+| 2 | **Login, Roles y Avatar** | âœ… Cumplido | [AccountController.cs](TallerApp.Web/Controllers/AccountController.cs). Manejo de claims, roles y actualizaciÃ³n de sesiÃ³n. | Captura de perfil con avatar en la app. |
+| 3 | **Manejo de Archivos (Extra)** | âœ… Cumplido | [ComprobantesPagoController.cs](TallerApp.Web/Controllers/ComprobantesPagoController.cs) (ValidaciÃ³n de tipo/tamaÃ±o y almacenamiento seguro). | Captura de subida de comprobante PDF/JPG. |
+| 4 | **ABM en Vue.js + AJAX** | âœ… Cumplido | [Ordenes/Create.cshtml](TallerApp.Web/Views/Ordenes/Create.cshtml). Formulario reactivo para creaciÃ³n de Ã³rdenes sin recarga. | Captura/GIF del formulario de Ã³rdenes dinÃ¡mico. |
+| 5 | **Paginado por Servidor** | âœ… Cumplido | [RepositorioCliente.cs](TallerApp.Web/Data/RepositorioCliente.cs) (Uso de `LIMIT` y `OFFSET` en consultas SQL). | Captura de la UI mostrando paginaciÃ³n funcional. |
+| 6 | **SelecciÃ³n AsÃ­ncrona (AJAX)** | âœ… Cumplido | [OrdenesController.cs](TallerApp.Web/Controllers/OrdenesController.cs) (`GetClientes`, `GetMecanicos` con parÃ¡metro `busqueda` para no cargar 1000 registros). | Captura/GIF buscando entidades en desplegable. |
+| 7 | **Web API + JWT** | âš ï¸ En desarrollo | Pendiente de implementaciÃ³n final y documentaciÃ³n Postman por parte del Integrante 3. | - |
+
+---
+
+## ðŸš€ InstalaciÃ³n y EjecuciÃ³n Local
+
+1. **Clonar el repositorio:**
+   ```bash
+   git clone https://github.com/jontive21/TallerApp.git
+   cd TallerApp
+   ```
+2. **Restaurar dependencias:**
+   ```bash
+   cd TallerApp.Web
+   dotnet restore
+   ```
+3. **Configurar la Base de Datos:**
+   - AsegÃºrate de tener un servidor MySQL corriendo.
+   - Crea una base de datos llamada `db_tallerapp`.
+   - Ejecuta el script SQL proporcionado en `docs/db_tallerapp.sql` para crear las tablas, relaciones y datos de prueba.
+   - Verifica que la cadena de conexiÃ³n en `appsettings.json` coincida con tu configuraciÃ³n local.
+4. **Ejecutar la aplicaciÃ³n:**
+   ```bash
+   dotnet run
+   ```
+5. Accede a `http://localhost:5063` en tu navegador web.
+
+---
+
+## ðŸ“‚ Estructura del Proyecto
+- `Controllers/` - Controladores MVC que manejan las rutas, validaciones y lÃ³gica de presentaciÃ³n.
+- `Data/` - Interfaces e implementaciones de los repositorios (patrÃ³n Repository) para acceso seguro a MySQL.
+- `Models/` - Entidades de dominio y ViewModels para la validaciÃ³n de formularios con Data Annotations.
+- `Views/` - Vistas Razor (.cshtml) y componentes dinÃ¡micos con Vue.js.
+- `wwwroot/` - Archivos estÃ¡ticos (CSS, JS, imÃ¡genes). *Nota: Las carpetas `uploads` y `avatars` estÃ¡n excluidas del repositorio vÃ­a `.gitignore`*.

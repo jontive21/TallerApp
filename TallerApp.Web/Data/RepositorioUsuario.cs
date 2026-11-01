@@ -126,7 +126,7 @@ using MySqlConnector;
         {
             using (var connection = ObtenerConexion())
             {
-                var sql = "DELETE FROM Usuarioss WHERE IdUsuario = @IdUsuario;";
+                var sql = "DELETE FROM Usuarios WHERE IdUsuario = @IdUsuario;";
                 using (var command = new MySqlCommand(sql, connection))
                 {
                     command.Parameters.AddWithValue("@IdUsuario", id);

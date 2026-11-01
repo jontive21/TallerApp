@@ -22,46 +22,7 @@ namespace TallerApp.Web.Controllers
             _entorno = entorno;
         }
 
-        // MÉTODO TEMPORAL PARA CREAR USUARIO ADMIN DE PRUEBA
-        [HttpGet]
-        public IActionResult CrearAdminTest()
-        {
-            var usuario = new Usuario
-            {
-                NombreCompleto = "Administrador",
-                Email = "admin@tallerapp.com",
-                PasswordHash = PasswordHelper.GenerarHash("Admin123"),
-                Rol = "Admin"
-            };
-            _repoUsuario.Alta(usuario);
-            return Content("✅ Usuario Admin creado! Email: admin@tallerapp.com | Password: Admin123");
-        }
-
         // ===================== LOGIN / LOGOUT =====================
-[HttpGet]
-public IActionResult DiagnosticarLogin()
-{
-    string emailPrueba = "admin@tallerapp.com";
-    string passwordPrueba = "Admin123";
-
-    var usuario = _repoUsuario.ObtenerPorEmail(emailPrueba);
-    
-    if (usuario == null)
-    {
-        return Content($"❌ ERROR: No se encontró ningún usuario con el email '{emailPrueba}' en la base de datos.");
-    }
-
-    bool esValido = PasswordHelper.VerificarHash(passwordPrueba, usuario.PasswordHash);
-    
-    if (esValido)
-    {
-        return Content($"✅ ÉXITO: El usuario '{usuario.Email}' fue encontrado y la contraseña '{passwordPrueba}' es CORRECTA.\nHash en BD: {usuario.PasswordHash}");
-    }
-    else
-    {
-        return Content($"❌ ERROR DE CONTRASEÑA: El usuario '{usuario.Email}' fue encontrado, pero la contraseña '{passwordPrueba}' NO coincide con el hash almacenado.\nHash en BD: {usuario.PasswordHash}");
-    }
-}
         [HttpGet]
         public IActionResult Login(string? returnUrl = null)
         {
@@ -96,7 +57,7 @@ public IActionResult DiagnosticarLogin()
                     return LocalRedirect(returnUrl ?? "/");
                 }
 
-                ModelState.AddModelError(string.Empty, "Usuario o contraseÃ±a incorrectos.");
+                ModelState.AddModelError(string.Empty, "Usuario o contraseña incorrectos.");
             }
 
             return View(model);
@@ -111,7 +72,6 @@ public IActionResult DiagnosticarLogin()
         }
 
         // ===================== PERFIL PROPIO =====================
-
         [Authorize]
         public IActionResult Perfil()
         {
@@ -152,7 +112,6 @@ public IActionResult DiagnosticarLogin()
                 usuario.Email = model.Email;
                 _repoUsuario.Modificacion(usuario);
 
-                // El nombre vive en la cookie de sesiÃ³n: se vuelve a emitir para que el navbar lo refleje.
                 await RefrescarSesionAsync(usuario);
 
                 TempData["Mensaje"] = "Datos personales actualizados correctamente.";
@@ -165,7 +124,7 @@ public IActionResult DiagnosticarLogin()
             }
         }
 
-        // ----- Cambiar contraseÃ±a -----
+        // ----- Cambiar contraseña -----
         [Authorize]
         [HttpGet]
         public IActionResult CambiarClave()
@@ -185,7 +144,7 @@ public IActionResult DiagnosticarLogin()
 
             if (!PasswordHelper.VerificarHash(model.ClaveActual, usuario.PasswordHash))
             {
-                ModelState.AddModelError("ClaveActual", "La contraseÃ±a actual es incorrecta.");
+                ModelState.AddModelError("ClaveActual", "La contraseña actual es incorrecta.");
                 return View(model);
             }
 
@@ -194,12 +153,12 @@ public IActionResult DiagnosticarLogin()
                 usuario.PasswordHash = PasswordHelper.GenerarHash(model.ClaveNueva);
                 _repoUsuario.Modificacion(usuario);
 
-                TempData["Mensaje"] = "ContraseÃ±a cambiada correctamente.";
+                TempData["Mensaje"] = "Contraseña cambiada correctamente.";
                 return RedirectToAction(nameof(Perfil));
             }
             catch
             {
-                ViewBag.Error = "No se pudo cambiar la contraseÃ±a.";
+                ViewBag.Error = "No se pudo cambiar la contraseña.";
                 return View(model);
             }
         }
@@ -224,7 +183,7 @@ public IActionResult DiagnosticarLogin()
 
             if (AvatarFile == null || AvatarFile.Length == 0)
             {
-                ViewBag.Error = "DebÃ©s seleccionar una imagen.";
+                ViewBag.Error = "Debés seleccionar una imagen.";
                 return View(usuario);
             }
 
@@ -233,11 +192,10 @@ public IActionResult DiagnosticarLogin()
                 var ruta = GuardarAvatar(AvatarFile);
                 if (ruta == null)
                 {
-                    ViewBag.Error = "Formato o tamaÃ±o de imagen no vÃ¡lido (mÃ¡x 2MB, jpg/png/webp/gif).";
+                    ViewBag.Error = "Formato o tamaño de imagen no válido (máx 2MB, jpg/png/webp/gif).";
                     return View(usuario);
                 }
 
-                // ReciÃ©n ahora que el nuevo se guardÃ³ bien, se borra el anterior.
                 EliminarArchivoSiExiste(usuario.Avatar);
                 usuario.Avatar = ruta;
                 _repoUsuario.Modificacion(usuario);
@@ -278,7 +236,6 @@ public IActionResult DiagnosticarLogin()
         }
 
         // ===================== HELPERS =====================
-
         private async Task RefrescarSesionAsync(Usuario usuario)
         {
             var claims = new List<Claim>

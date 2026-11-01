@@ -48,11 +48,11 @@ namespace TallerApp.Web.Controllers
         // ========== Endpoints para Vue.js (GET) ==========
 
         [HttpGet]
-        public IActionResult GetClientes()
-        {
-            var clientes = _repoCliente.ObtenerTodos(1, 1000);
-            return Json(clientes);
-        }
+public IActionResult GetClientes(string? busqueda = null)
+{
+    var clientes = _repoCliente.ObtenerTodos(1, 20, busqueda);
+    return Json(clientes);
+}
 
         [HttpGet]
         public IActionResult GetVehiculosPorCliente(int clienteId)
@@ -62,11 +62,11 @@ namespace TallerApp.Web.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetMecanicos()
-        {
-            var mecanicos = _repoMecanico.ObtenerTodos(1, 1000);
-            return Json(mecanicos);
-        }
+public IActionResult GetMecanicos(string? busqueda = null)
+{
+    var mecanicos = _repoMecanico.ObtenerTodos(1, 20, busqueda);
+    return Json(mecanicos);
+}
 
         [HttpGet]
         public IActionResult GetRepuestos(string? busqueda = null)

@@ -5,8 +5,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Agregar servicios al contenedor
 builder.Services.AddControllersWithViews();
 
-// Registrar el repositorio de usuario
-builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();   
+// Registrar los repositorios
+builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();
 builder.Services.AddScoped<IRepositorioCliente, RepositorioCliente>();
 builder.Services.AddScoped<IRepositorioVehiculo, RepositorioVehiculo>();
 builder.Services.AddScoped<IRepositorioMecanico, RepositorioMecanico>();
@@ -14,11 +14,17 @@ builder.Services.AddScoped<IRepositorioRepuesto, RepositorioRepuesto>();
 builder.Services.AddScoped<IRepositorioOrdenTrabajo, RepositorioOrdenTrabajo>();
 builder.Services.AddScoped<IRepositorioComprobantePago, RepositorioComprobantePago>();
 
-// Configurar autenticaciï¿½n por cookies
+// 1. Configurar Autorización (Políticas de Roles)
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SoloAdmin", policy => policy.RequireRole("Admin"));
+});
+
+// 2. Configurar autenticación por cookies
 builder.Services.AddAuthentication("Cookies")
     .AddCookie("Cookies", options => {
         options.LoginPath = "/Account/Login";
-        options.AccessDeniedPath = "/Account/Login";
+        options.AccessDeniedPath = "/Account/AccesoDenegado";
     });
 
 var app = builder.Build();
