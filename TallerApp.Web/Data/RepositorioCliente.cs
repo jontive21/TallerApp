@@ -86,6 +86,11 @@ namespace TallerApp.Web.Data
             return null;
         }
 
+        public Cliente? ObtenerPorCliente(int id)
+        {
+            return ObtenerPorId(id);
+        }
+
         public void Alta(Cliente cliente)
         {
             using var conexion = ObtenerConexion();
