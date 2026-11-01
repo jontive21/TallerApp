@@ -1,4 +1,4 @@
-using TallerApp.Web.Data;
+﻿using TallerApp.Web.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,9 +11,10 @@ builder.Services.AddScoped<IRepositorioCliente, RepositorioCliente>();
 builder.Services.AddScoped<IRepositorioVehiculo, RepositorioVehiculo>();
 builder.Services.AddScoped<IRepositorioMecanico, RepositorioMecanico>();
 builder.Services.AddScoped<IRepositorioRepuesto, RepositorioRepuesto>();
+builder.Services.AddScoped<IRepositorioOrdenTrabajo, RepositorioOrdenTrabajo>();
 builder.Services.AddScoped<IRepositorioComprobantePago, RepositorioComprobantePago>();
 
-// Configurar autenticaci�n por cookies
+// Configurar autenticaciï¿½n por cookies
 builder.Services.AddAuthentication("Cookies")
     .AddCookie("Cookies", options => {
         options.LoginPath = "/Account/Login";

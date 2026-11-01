@@ -273,7 +273,7 @@
                     try {
                         // Por ahora apuntamos a un endpoint temporal.
                         // Después el Integrante 3 lo cambiará a /api/Ordenes
-                        const res = await fetch('/api/Ordenes', {
+                           const res = await fetch('/Ordenes/CrearOrden', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
