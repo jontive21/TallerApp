@@ -8,6 +8,7 @@ namespace TallerApp.Web.Data
         List<Cliente> ObtenerTodos(int pagina = 1, int registrosPorPagina = 10, string? busqueda = null);
         int ObtenerTotalClientes(string? busqueda = null);
         Cliente? ObtenerPorId(int id);
+        List<Vehiculo> ObtenerPorCliente(int clienteId);
         void Alta(Cliente cliente);
         void Modificar(Cliente cliente);
         void Eliminar(int id);

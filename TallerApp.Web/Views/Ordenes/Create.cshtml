@@ -1,0 +1,307 @@
+@{
+    ViewData["Title"] = "Nueva Orden de Trabajo";
+}
+
+<div id="app" class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Nueva Orden de Trabajo</h2>
+        <a asp-action="Index" class="btn btn-secondary">Volver</a>
+    </div>
+
+    <div class="card shadow">
+        <div class="card-body">
+
+            <!-- Cliente y Vehículo -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">Cliente</label>
+                    <select class="form-select" v-model="clienteId" @change="cargarVehiculos">
+                        <option value="">Seleccione un cliente...</option>
+                        <option v-for="c in clientes" :value="c.idCliente">
+                            {{ c.nombreCompleto }} ({{ c.dni }})
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Vehículo</label>
+                    <select class="form-select" v-model="vehiculoId" :disabled="!clienteId">
+                        <option value="">Seleccione un vehículo...</option>
+                        <option v-for="v in vehiculos" :value="v.idVehiculo">
+                            {{ v.patente }} - {{ v.marca }} {{ v.modelo }} ({{ v.anio }})
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Mecánico -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">Mecánico</label>
+                    <select class="form-select" v-model="mecanicoId">
+                        <option value="">Seleccione un mecánico...</option>
+                        <option v-for="m in mecanicos" :value="m.idMecanico">
+                            {{ m.nombreCompleto }} - {{ m.especialidad }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Fecha de Ingreso</label>
+                    <input type="date" class="form-control" v-model="fechaIngreso">
+                </div>
+            </div>
+
+            <!-- Descripción -->
+            <div class="mb-3">
+                <label class="form-label">Descripción del Problema</label>
+                <textarea class="form-control" rows="3" v-model="descripcionProblema"
+                          placeholder="Describa el problema del vehículo..."></textarea>
+            </div>
+
+            <hr>
+
+            <!-- Sección de Repuestos -->
+            <h5 class="mb-3">Repuestos</h5>
+
+            <div class="row mb-3">
+                <div class="col-md-8">
+                    <input type="text" class="form-control" v-model="busquedaRepuesto"
+                           @input="buscarRepuestos" placeholder="Buscar repuesto por nombre o código...">
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" v-model="repuestoSeleccionado">
+                        <option value="">Seleccione un repuesto...</option>
+                        <option v-for="r in repuestosFiltrados" :value="r">
+                            {{ r.nombre }} ({{ r.codigo }}) - ${{ r.precio }} - Stock: {{ r.stock }}
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <button class="btn btn-success" @click="agregarRepuesto" :disabled="!repuestoSeleccionado">
+                    + Agregar Repuesto
+                </button>
+            </div>
+
+            <!-- Tabla de repuestos agregados -->
+            <div class="table-responsive" v-if="items.length > 0">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Repuesto</th>
+                            <th>Código</th>
+                            <th width="120">Cantidad</th>
+                            <th>Precio Unit.</th>
+                            <th>Subtotal</th>
+                            <th width="80"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(item, index) in items" :key="index">
+                            <td>{{ item.nombre }}</td>
+                            <td>{{ item.codigo }}</td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm"
+                                       v-model.number="item.cantidad" min="1" @change="calcularTotales">
+                            </td>
+                            <td>${{ item.precioUnitario.toFixed(2) }}</td>
+                            <td>${{ (item.cantidad * item.precioUnitario).toFixed(2) }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" @click="eliminarItem(index)">X</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-secondary">
+                            <td colspan="4" class="text-end"><strong>TOTAL:</strong></td>
+                            <td colspan="2"><strong>${{ total.toFixed(2) }}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <div v-else class="alert alert-info">
+                No hay repuestos agregados todavía.
+            </div>
+
+            <hr>
+
+            <!-- Observaciones -->
+            <div class="mb-3">
+                <label class="form-label">Observaciones</label>
+                <textarea class="form-control" rows="2" v-model="observaciones"></textarea>
+            </div>
+
+            <!-- Botón Guardar -->
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-primary btn-lg" @click="guardarOrden" :disabled="guardando">
+                    <span v-if="guardando">Guardando...</span>
+                    <span v-else>Guardar Orden de Trabajo</span>
+                </button>
+            </div>
+
+            <!-- Mensajes -->
+            <div v-if="mensaje" class="alert mt-3" :class="mensajeExito ? 'alert-success' : 'alert-danger'">
+                {{ mensaje }}
+            </div>
+
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    // Datos principales
+                    clienteId: '',
+                    vehiculoId: '',
+                    mecanicoId: '',
+                    fechaIngreso: new Date().toISOString().split('T')[0],
+                    descripcionProblema: '',
+                    observaciones: '',
+
+                    // Listas
+                    clientes: [],
+                    vehiculos: [],
+                    mecanicos: [],
+                    repuestosFiltrados: [],
+                    items: [],          // repuestos agregados a la orden
+
+                    // Auxiliares
+                    busquedaRepuesto: '',
+                    repuestoSeleccionado: null,
+                    total: 0,
+                    guardando: false,
+                    mensaje: '',
+                    mensajeExito: false
+                }
+            },
+            mounted() {
+                this.cargarClientes();
+                this.cargarMecanicos();
+            },
+            methods: {
+                async cargarClientes() {
+                    const res = await fetch('/Ordenes/GetClientes');
+                    this.clientes = await res.json();
+                },
+                async cargarMecanicos() {
+                    const res = await fetch('/Ordenes/GetMecanicos');
+                    this.mecanicos = await res.json();
+                },
+                async cargarVehiculos() {
+                    this.vehiculoId = '';
+                    this.vehiculos = [];
+                    if (!this.clienteId) return;
+
+                    const res = await fetch(`/Ordenes/GetVehiculosPorCliente?clienteId=${this.clienteId}`);
+                    this.vehiculos = await res.json();
+                },
+                async buscarRepuestos() {
+                    if (this.busquedaRepuesto.length < 2) {
+                        this.repuestosFiltrados = [];
+                        return;
+                    }
+                    const res = await fetch(`/Ordenes/GetRepuestos?busqueda=${encodeURIComponent(this.busquedaRepuesto)}`);
+                    this.repuestosFiltrados = await res.json();
+                },
+                agregarRepuesto() {
+                    if (!this.repuestoSeleccionado) return;
+
+                    // Evitar duplicados
+                    const existe = this.items.find(i => i.repuestoId === this.repuestoSeleccionado.idRepuesto);
+                    if (existe) {
+                        existe.cantidad++;
+                    } else {
+                        this.items.push({
+                            repuestoId: this.repuestoSeleccionado.idRepuesto,
+                            nombre: this.repuestoSeleccionado.nombre,
+                            codigo: this.repuestoSeleccionado.codigo,
+                            cantidad: 1,
+                            precioUnitario: this.repuestoSeleccionado.precio
+                        });
+                    }
+
+                    this.repuestoSeleccionado = null;
+                    this.busquedaRepuesto = '';
+                    this.repuestosFiltrados = [];
+                    this.calcularTotales();
+                },
+                eliminarItem(index) {
+                    this.items.splice(index, 1);
+                    this.calcularTotales();
+                },
+                calcularTotales() {
+                    this.total = this.items.reduce((sum, item) => {
+                        return sum + (item.cantidad * item.precioUnitario);
+                    }, 0);
+                },
+                async guardarOrden() {
+                    // Validaciones básicas
+                    if (!this.clienteId || !this.vehiculoId || !this.mecanicoId) {
+                        this.mensaje = 'Debe seleccionar Cliente, Vehículo y Mecánico';
+                        this.mensajeExito = false;
+                        return;
+                    }
+
+                    this.guardando = true;
+                    this.mensaje = '';
+
+                    const orden = {
+                        vehiculoId: parseInt(this.vehiculoId),
+                        mecanicoId: parseInt(this.mecanicoId),
+                        fechaIngreso: this.fechaIngreso,
+                        descripcionProblema: this.descripcionProblema,
+                        observaciones: this.observaciones,
+                        estado: 'Pendiente',
+                        repuestos: this.items.map(i => ({
+                            repuestoId: i.repuestoId,
+                            cantidad: i.cantidad,
+                            precioUnitario: i.precioUnitario
+                        }))
+                    };
+
+                    try {
+                        // Por ahora apuntamos a un endpoint temporal.
+                        // Después el Integrante 3 lo cambiará a /api/Ordenes
+                        const res = await fetch('/api/Ordenes', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(orden)
+                        });
+
+                        if (res.ok) {
+                            this.mensaje = 'Orden guardada correctamente';
+                            this.mensajeExito = true;
+
+                            // Limpiar formulario
+                            setTimeout(() => {
+                                window.location.href = '/Ordenes';
+                            }, 1500);
+                        } else {
+                            const error = await res.text();
+                            this.mensaje = 'Error al guardar: ' + error;
+                            this.mensajeExito = false;
+                        }
+                    } catch (error) {
+                        this.mensaje = 'Error de conexión: ' + error.message;
+                        this.mensajeExito = false;
+                    } finally {
+                        this.guardando = false;
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+}
