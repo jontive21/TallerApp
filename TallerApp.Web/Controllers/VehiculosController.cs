@@ -25,19 +25,19 @@ namespace TallerApp.Web.Controllers
             var vehiculos = _repositorioVehiculo.ObtenerTodos(pagina, registrosPorPagina, busqueda);
             int totalRegistros = _repositorioVehiculo.ObtenerTotalVehiculos(busqueda);
             int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
-
             ViewBag.Busqueda = busqueda;
             ViewBag.PaginaActual = pagina;
             ViewBag.TotalPaginas = totalPaginas;
-            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, int.MaxValue);
-            
+            // ✅ CORREGIDO: Máximo 100 clientes (no int.MaxValue)
+            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, 100);
             return View(vehiculos);
         }
 
         // GET: Vehiculos/Create
         public IActionResult Create()
         {
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto");
+            // ✅ CORREGIDO: Trae hasta 100 clientes con paginación
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto");
             return View();
         }
 
@@ -51,7 +51,7 @@ namespace TallerApp.Web.Controllers
                 _repositorioVehiculo.Alta(vehiculo);
                 return RedirectToAction(nameof(Index));
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
@@ -63,7 +63,7 @@ namespace TallerApp.Web.Controllers
             {
                 return NotFound();
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
@@ -76,13 +76,12 @@ namespace TallerApp.Web.Controllers
             {
                 return NotFound();
             }
-
             if (ModelState.IsValid)
             {
                 _repositorioVehiculo.Modificar(vehiculo);
                 return RedirectToAction(nameof(Index));
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
