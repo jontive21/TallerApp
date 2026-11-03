@@ -1,8 +1,8 @@
 ﻿@{
-    ViewData["Title"] = "Órdenes de Trabajo";
+    ViewData["Title"] = "Gestión de Órdenes (Vue.js)";
 }
 
-<div class="container mt-4">
+<div id="app" class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Órdenes de Trabajo</h2>
         <a asp-action="Create" class="btn btn-primary">
@@ -10,14 +10,132 @@
         </a>
     </div>
 
-    <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> 
-        Aquí se mostrará la lista de órdenes. (Próximamente con paginado y filtros)
-    </div>
-
-    <div class="card">
+    <div class="card shadow">
         <div class="card-body">
-            <p class="mb-0">Las órdenes creadas se mostrarán en esta tabla.</p>
+            <div v-if="cargando" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2">Cargando órdenes...</p>
+            </div>
+
+            <div v-else-if="ordenes.length === 0" class="alert alert-info">
+                No hay órdenes de trabajo registradas.
+            </div>
+
+            <div v-else class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>ID</th>
+                            <th>Fecha Ingreso</th>
+                            <th>Estado</th>
+                            <th>Descripción</th>
+                            <th width="150">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="orden in ordenes" :key="orden.idOrden">
+                            <td><strong>#{{ orden.idOrden }}</strong></td>
+                            <td>{{ formatearFecha(orden.fechaIngreso) }}</td>
+                            <td>
+                                <span class="badge" :class="getBadgeEstado(orden.estado)">
+                                    {{ orden.estado }}
+                                </span>
+                            </td>
+                            <td>{{ orden.descripcionProblema }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" @@click="eliminarOrden(orden.idOrden)" :disabled="eliminandoId === orden.idOrden">
+                                    <span v-if="eliminandoId === orden.idOrden">Eliminando...</span>
+                                    <span v-else><i class="bi bi-trash"></i> Eliminar</span>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div v-if="mensaje" class="alert mt-3" :class="mensajeExito ? 'alert-success' : 'alert-danger'">
+                {{ mensaje }}
+            </div>
         </div>
     </div>
 </div>
+
+@section Scripts {
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    ordenes: [],
+                    cargando: true,
+                    eliminandoId: null,
+                    mensaje: '',
+                    mensajeExito: false
+                }
+            },
+            mounted() {
+                this.cargarOrdenes();
+            },
+            methods: {
+                async cargarOrdenes() {
+                    this.cargando = true;
+                    try {
+                        const res = await fetch('/Ordenes/GetOrdenes');
+                        this.ordenes = await res.json();
+                    } catch (error) {
+                        this.mensaje = 'Error al cargar las órdenes';
+                        this.mensajeExito = false;
+                    } finally {
+                        this.cargando = false;
+                    }
+                },
+                async eliminarOrden(id) {
+                    if (!confirm('¿Estás seguro de eliminar esta orden y sus repuestos asociados?')) return;
+
+                    this.eliminandoId = id;
+                    this.mensaje = '';
+
+                    try {
+                        const res = await fetch(`/Ordenes/EliminarOrden?id=${id}`, {
+                            method: 'DELETE'
+                        });
+                        
+                        const data = await res.json();
+                        
+                        if (data.success) {
+                            this.mensaje = data.mensaje;
+                            this.mensajeExito = true;
+                            // Recargamos la tabla SIN recargar la página
+                            this.cargarOrdenes();
+                        } else {
+                            this.mensaje = data.mensaje;
+                            this.mensajeExito = false;
+                        }
+                    } catch (error) {
+                        this.mensaje = 'Error de conexión al eliminar';
+                        this.mensajeExito = false;
+                    } finally {
+                        this.eliminandoId = null;
+                    }
+                },
+                formatearFecha(fechaString) {
+                    if (!fechaString) return '';
+                    const fecha = new Date(fechaString);
+                    return fecha.toLocaleDateString('es-AR');
+                },
+                getBadgeEstado(estado) {
+                    if (estado === 'Pendiente') return 'bg-warning text-dark';
+                    if (estado === 'En Proceso') return 'bg-primary';
+                    if (estado === 'Finalizada') return 'bg-success';
+                    return 'bg-secondary';
+                }
+            }
+        }).mount('#app');
+    </script>
+}

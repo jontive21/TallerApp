@@ -125,5 +125,27 @@ public IActionResult GetMecanicos(string? busqueda = null)
                 return StatusCode(500, new { success = false, mensaje = "Error al crear la orden: " + ex.Message });
             }
         }
+                // ========== Endpoints para ABM en Vue.js (Listado y Baja) ==========
+
+                [HttpGet]
+        public IActionResult GetOrdenes()
+        {
+            var ordenes = _repoOrden.ObtenerTodos();
+            return Json(ordenes);
+        }
+
+        [HttpDelete]
+        public IActionResult EliminarOrden(int id)
+        {
+            try
+            {
+                _repoOrden.Eliminar(id);
+                return Json(new { success = true, mensaje = "Orden eliminada correctamente" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, mensaje = "Error: " + ex.Message });
+            }
+        }
     }
 }

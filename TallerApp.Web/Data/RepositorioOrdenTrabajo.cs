@@ -13,13 +13,10 @@ namespace TallerApp.Web.Data
         {
             using var conexion = ObtenerConexion();
             conexion.Open();
-            
-            // Iniciamos una transacción para garantizar integridad
             using var transaction = conexion.BeginTransaction();
             
             try
             {
-                // 1. Insertar la Orden de Trabajo
                 string sqlOrden = @"INSERT INTO ordenestrabajo 
                     (VehiculoId, MecanicoId, FechaIngreso, FechaEntregaEstimada, Estado, DescripcionProblema, Observaciones, IdUsuarioCreacion) 
                     VALUES (@vehiculo, @mecanico, @fechaIngreso, @fechaEntrega, @estado, @descripcion, @observaciones, @usuario)";
@@ -35,15 +32,11 @@ namespace TallerApp.Web.Data
                 cmdOrden.Parameters.AddWithValue("@usuario", orden.IdUsuarioCreacion);
                 
                 cmdOrden.ExecuteNonQuery();
-                
-                // Obtener el ID generado
                 cmdOrden.CommandText = "SELECT LAST_INSERT_ID();";
                 int nuevaOrdenId = Convert.ToInt32(cmdOrden.ExecuteScalar());
 
-                // 2. Insertar los detalles (Repuestos) y descontar stock
                 string sqlDetalle = @"INSERT INTO OrdenRepuesto (OrdenId, RepuestoId, Cantidad, PrecioUnitario) 
                                       VALUES (@ordenId, @repuestoId, @cantidad, @precio)";
-                
                 string sqlStock = "UPDATE Repuestos SET Stock = Stock - @cantidad WHERE IdRepuesto = @repuestoId";
 
                 foreach (var detalle in detalles)
@@ -55,20 +48,75 @@ namespace TallerApp.Web.Data
                     cmdDetalle.Parameters.AddWithValue("@precio", detalle.PrecioUnitario);
                     cmdDetalle.ExecuteNonQuery();
 
-                    // Descontar del stock
                     using var cmdStock = new MySqlCommand(sqlStock, conexion, transaction);
                     cmdStock.Parameters.AddWithValue("@cantidad", detalle.Cantidad);
                     cmdStock.Parameters.AddWithValue("@repuestoId", detalle.RepuestoId);
                     cmdStock.ExecuteNonQuery();
                 }
 
-                // 3. Confirmar la transacción
                 transaction.Commit();
                 return nuevaOrdenId;
             }
             catch
             {
-                // Si algo falla, deshacer todo
+                transaction.Rollback();
+                throw;
+            }
+        }
+
+        // ==========================================
+        // IMPLEMENTACIÓN DE LOS NUEVOS MÉTODOS
+        // ==========================================
+
+        public List<OrdenTrabajo> ObtenerTodos()
+        {
+            var lista = new List<OrdenTrabajo>();
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            // Consulta simple SIN JOIN para evitar errores de nombres de tablas
+            string sql = @"SELECT IdOrden, FechaIngreso, Estado, DescripcionProblema 
+                           FROM ordenestrabajo 
+                           ORDER BY FechaIngreso DESC";
+            
+            using var cmd = new MySqlCommand(sql, conexion);
+            using var reader = cmd.ExecuteReader();
+            
+            while (reader.Read())
+            {
+                lista.Add(new OrdenTrabajo {
+                    IdOrden = reader.GetInt32("IdOrden"),
+                    FechaIngreso = reader.GetDateTime("FechaIngreso"),
+                    Estado = reader.GetString("Estado"),
+                    DescripcionProblema = reader.GetString("DescripcionProblema")
+                });
+            }
+            return lista;
+        }
+
+        public void Eliminar(int id)
+        {
+            using var conexion = ObtenerConexion();
+            conexion.Open();
+            
+            using var transaction = conexion.BeginTransaction();
+            try
+            {
+                // 1. Borrar los repuestos asociados a esta orden
+                using var cmdDetalles = new MySqlCommand("DELETE FROM OrdenRepuesto WHERE OrdenId = @id", conexion, transaction);
+                cmdDetalles.Parameters.AddWithValue("@id", id);
+                cmdDetalles.ExecuteNonQuery();
+
+                // 2. Borrar la orden de trabajo
+                using var cmdOrden = new MySqlCommand("DELETE FROM ordenestrabajo WHERE IdOrden = @id", conexion, transaction);
+                cmdOrden.Parameters.AddWithValue("@id", id);
+                cmdOrden.ExecuteNonQuery();
+
+                // 3. Confirmar
+                transaction.Commit();
+            }
+            catch
+            {
                 transaction.Rollback();
                 throw;
             }
