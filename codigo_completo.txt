@@ -1,78 +1,96 @@
-﻿
+﻿===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\Api\ApiAuthController.cs =====
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using TallerApp.Web.Data;
+using TallerApp.Web.Models;
 
-=====================================================================
-ARCHIVO: docs\PROPUESTA.md
-=====================================================================
+namespace TallerApp.Web.Controllers.Api
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ApiAuthController : ControllerBase
+    {
+        private readonly IRepositorioUsuario _repoUsuario;
 
-# Propuesta de Proyecto Integrador Final - TallerApp
+        public ApiAuthController(IRepositorioUsuario repoUsuario)
+        {
+            _repoUsuario = repoUsuario;
+        }
 
-## 1. Datos del Grupo
+        [HttpPost("login")]
+        public IActionResult Login([FromBody] LoginViewModel model)
+        {
+            // 1. Buscar el usuario
+            var usuario = _repoUsuario.ObtenerPorEmail(model.Email);
 
-| Apellido | Nombre | Github |
-|----------|--------|-------|
-| Roldán | Saúl | GitHub: saul28roldan-pixel |
-| Ontiveros | José | GitHub: jontive21 |
-|  Orozco| Miguel | GitHub: BLACK1895 |
+            // 2. Verificar que exista y la contraseÃ±a sea correcta
+            if (usuario == null || !PasswordHelper.VerificarHash(model.Password, usuario.PasswordHash))
+            {
+                return Unauthorized(new { mensaje = "Credenciales invÃ¡lidas" });
+            }
 
-*(Reemplazar con los datos reales de los integrantes del grupo)*
+            // 3. Crear los Claims (la informaciÃ³n que irÃ¡ dentro del token)
+            var claims = new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()),
+                new Claim(ClaimTypes.Name, usuario.NombreCompleto),
+                new Claim(ClaimTypes.Role, usuario.Rol)
+            };
 
-## 2. Título del Proyecto
+            // 4. Configurar la clave secreta (debe ser la misma que en Program.cs)
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("TuClaveSecretaMuyLargaYSeguraDeAlMenos32Caracteres123!"));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-**TallerApp - Sistema de Gestión Integral para Talleres Mecánicos**
+            // 5. Generar el Token
+            var token = new JwtSecurityToken(
+                issuer: "TallerAppIssuer",
+                audience: "TallerAppAudience",
+                claims: claims,
+                expires: DateTime.Now.AddHours(2), // El token dura 2 horas
+                signingCredentials: creds
+            );
 
-## 3. Temática Elegida
+            // 6. Devolver el token al cliente
+            return Ok(new
+            {
+                token = new JwtSecurityTokenHandler().WriteToken(token),
+                usuario = usuario.NombreCompleto,
+                rol = usuario.Rol
+            });
+        }
+    }
+}
 
-Sistema web MVC para la gestión de órdenes de trabajo, clientes, vehículos, mecánicos y repuestos en un taller mecánico.
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\Api\ApiOrdenesController.cs =====
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
-## 4. Descripción de la Problemática
+namespace TallerApp.Web.Controllers.Api
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    // Le decimos que SOLO este controlador exija el Token JWT (Bearer)
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)] 
+    public class ApiOrdenesController : ControllerBase
+    {
+        [HttpGet("test")]
+        public IActionResult Test()
+        {
+            var nombreUsuario = User.Identity?.Name;
+            return Ok(new 
+            { 
+                mensaje = $"Â¡Acceso concedido, {nombreUsuario}! Tu token JWT es vÃ¡lido.",
+                nota = "Este endpoint estÃ¡ protegido por JWT."
+            });
+        }
+    }
+}
 
-Los talleres mecánicos pequeños y medianos suelen gestionar sus órdenes de trabajo, turnos, repuestos y facturación de manera manual o mediante planillas de cálculo dispersas. Esto genera:
-- Pérdida de trazabilidad sobre el estado de cada vehículo en reparación.
-- Dificultad para auditar qué mecánico realizó cada trabajo y qué repuestos utilizó.
-- Errores en el stock de repuestos por falta de control en tiempo real.
-- Imposibilidad de generar reportes de productividad por mecánico o de rentabilidad por tipo de trabajo.
-
-## 5. Propuesta de Solución
-
-Se propone desarrollar **TallerApp**, un sistema web MVC que permita:
-- Gestionar el alta, baja y modificación de clientes, vehículos, mecánicos y repuestos.
-- Crear **Órdenes de Trabajo** que vinculen un vehículo, un mecánico y los repuestos utilizados, con seguimiento de estado (Pendiente → En Proceso → Finalizada → Entregada).
-- Controlar el stock de repuestos de forma automática al asignarlos a una orden.
-- Registrar comprobantes de pago asociados a cada orden (manejo de archivos).
-- Implementar un **módulo SPA con Vue.js** para la gestión ágil de órdenes de trabajo sin recargas de página.
-- Exponer una **Web API REST con JWT** para consulta de órdenes y reportes.
-- Control de roles: **Administrador** (acceso total), **Mecánico** (solo ve sus órdenes asignadas), **Recepcionista** (gestiona clientes y turnos).
-
-## 6. Modelo de Datos
-
-### Entidades principales (8 tablas)
-
-| Entidad | Descripción |
-|---------|-------------|
-| **Usuario** | IdUsuario, NombreCompleto, Email, PasswordHash, Rol, Avatar |
-| **Cliente** | IdCliente, NombreCompleto, DNI, Telefono, Email, Direccion |
-| **Vehiculo** | IdVehiculo, Patente, Marca, Modelo, Anio, Color, ClienteId (FK) |
-| **Mecanico** | IdMecanico, NombreCompleto, Matricula, Especialidad, Email, Telefono |
-| **Repuesto** | IdRepuesto, Nombre, Codigo, Precio, Stock, Foto (archivo) |
-| **OrdenTrabajo** | IdOrden, VehiculoId (FK), MecanicoId (FK), FechaIngreso, FechaEntrega, Estado, Descripcion, IdUsuarioCreacion |
-| **OrdenRepuesto** | IdOrdenRepuesto, OrdenId (FK), RepuestoId (FK), Cantidad, PrecioUnitario (relación N:M) |
-| **ComprobantePago** | IdComprobante, OrdenId (FK), Monto, FechaPago, ArchivoComprobante, Estado, IdUsuarioCreacion |
-
-### Descripción de Relaciones
-- **Cliente → Vehículo (1:N):** Un cliente puede tener múltiples vehículos registrados.
-- **OrdenTrabajo → Vehículo + Mecánico:** Cada orden pertenece a un vehículo y está asignada a un mecánico.
-- **OrdenTrabajo ↔ Repuesto (N:M):** Una orden usa múltiples repuestos, y un repuesto se usa en muchas órdenes (vía tabla intermedia `OrdenRepuesto`).
-- **OrdenTrabajo → ComprobantePago (1:N):** Una orden puede tener múltiples comprobantes de pago.
-
-## 7. Diagrama Entidad-Relación (DER)
-
-![Diagrama Entidad-Relación](docs/DER_TallerApp.drawio.png)
-
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\AccountController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\AccountController.cs =====
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -365,11 +383,7 @@ namespace TallerApp.Web.Controllers
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\ClientesController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\ClientesController.cs =====
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TallerApp.Web.Data;
@@ -472,11 +486,7 @@ namespace TallerApp.Web.Controllers
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\ComprobantesPagoController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\ComprobantesPagoController.cs =====
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TallerApp.Web.Data;
@@ -683,11 +693,7 @@ public class ComprobantesPagoController : Controller
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\HomeController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\HomeController.cs =====
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using TallerApp.Web.Models;
@@ -714,10 +720,7 @@ public class HomeController : Controller
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\MecanicosController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\MecanicosController.cs =====
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TallerApp.Web.Data;
@@ -820,11 +823,7 @@ namespace TallerApp.Web.Controllers
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\OrdenesController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\OrdenesController.cs =====
 using System.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -955,11 +954,7 @@ public IActionResult GetMecanicos(string? busqueda = null)
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\RepuestosController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\RepuestosController.cs =====
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TallerApp.Web.Data;
@@ -1062,11 +1057,7 @@ namespace TallerApp.Web.Controllers
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Controllers\VehiculosController.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Controllers\VehiculosController.cs =====
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -1094,19 +1085,19 @@ namespace TallerApp.Web.Controllers
             var vehiculos = _repositorioVehiculo.ObtenerTodos(pagina, registrosPorPagina, busqueda);
             int totalRegistros = _repositorioVehiculo.ObtenerTotalVehiculos(busqueda);
             int totalPaginas = (int)Math.Ceiling(totalRegistros / (double)registrosPorPagina);
-
             ViewBag.Busqueda = busqueda;
             ViewBag.PaginaActual = pagina;
             ViewBag.TotalPaginas = totalPaginas;
-            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, int.MaxValue);
-            
+            // ✅ CORREGIDO: Máximo 100 clientes (no int.MaxValue)
+            ViewBag.Clientes = _repositorioCliente.ObtenerTodos(1, 100);
             return View(vehiculos);
         }
 
         // GET: Vehiculos/Create
         public IActionResult Create()
         {
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto");
+            // ✅ CORREGIDO: Trae hasta 100 clientes con paginación
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto");
             return View();
         }
 
@@ -1120,7 +1111,7 @@ namespace TallerApp.Web.Controllers
                 _repositorioVehiculo.Alta(vehiculo);
                 return RedirectToAction(nameof(Index));
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
@@ -1132,7 +1123,7 @@ namespace TallerApp.Web.Controllers
             {
                 return NotFound();
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
@@ -1145,13 +1136,12 @@ namespace TallerApp.Web.Controllers
             {
                 return NotFound();
             }
-
             if (ModelState.IsValid)
             {
                 _repositorioVehiculo.Modificar(vehiculo);
                 return RedirectToAction(nameof(Index));
             }
-            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
+            ViewBag.ClienteId = new SelectList(_repositorioCliente.ObtenerTodos(1, 100), "IdCliente", "NombreCompleto", vehiculo.ClienteId);
             return View(vehiculo);
         }
 
@@ -1178,11 +1168,7 @@ namespace TallerApp.Web.Controllers
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioCliente.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioCliente.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1199,11 +1185,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioComprobantePago.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioComprobantePago.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1220,11 +1202,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioMecanico.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioMecanico.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1241,11 +1219,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioOrdenTrabajo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioOrdenTrabajo.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1258,11 +1232,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioRepuesto.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioRepuesto.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1279,11 +1249,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioUsuario.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioUsuario.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1300,11 +1266,7 @@ using System.Collections.Generic;
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\IRepositorioVehiculo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\IRepositorioVehiculo.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 
@@ -1322,11 +1284,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioBase.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioBase.cs =====
    using Microsoft.Extensions.Configuration;
    using MySqlConnector;
 
@@ -1349,11 +1307,7 @@ ARCHIVO: TallerApp.Web\Data\RepositorioBase.cs
        }
    }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioCliente.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioCliente.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -1485,11 +1439,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioComprobantePago.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioComprobantePago.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -1620,11 +1570,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioMecanico.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioMecanico.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -1751,11 +1697,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioOrdenTrabajo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioOrdenTrabajo.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -1834,11 +1776,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioRepuesto.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioRepuesto.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -1965,11 +1903,7 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioUsuario.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioUsuario.cs =====
 using TallerApp.Web.Models;
 using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
@@ -2123,11 +2057,7 @@ using MySqlConnector;
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Data\RepositorioVehiculo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Data\RepositorioVehiculo.cs =====
 using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using MySqlConnector;
@@ -2281,41 +2211,33 @@ namespace TallerApp.Web.Data
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\CambiarClaveViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\CambiarClaveViewModel.cs =====
 using System.ComponentModel.DataAnnotations;
 
 namespace TallerApp.Web.Models
 {
     public class CambiarClaveViewModel
     {
-        [Required(ErrorMessage = "La contraseña actual es obligatoria")]
+        [Required(ErrorMessage = "La contraseÃ±a actual es obligatoria")]
         [DataType(DataType.Password)]
-        [Display(Name = "Contraseña Actual")]
+        [Display(Name = "ContraseÃ±a Actual")]
         public string ClaveActual { get; set; } = "";
 
-        [Required(ErrorMessage = "La nueva contraseña es obligatoria")]
-        [MinLength(6, ErrorMessage = "La contraseña debe tener al menos 6 caracteres")]
+        [Required(ErrorMessage = "La nueva contraseÃ±a es obligatoria")]
+        [MinLength(6, ErrorMessage = "La contraseÃ±a debe tener al menos 6 caracteres")]
         [DataType(DataType.Password)]
-        [Display(Name = "Nueva Contraseña")]
+        [Display(Name = "Nueva ContraseÃ±a")]
         public string ClaveNueva { get; set; } = "";
 
-        [Required(ErrorMessage = "Debés confirmar la nueva contraseña")]
+        [Required(ErrorMessage = "DebÃ©s confirmar la nueva contraseÃ±a")]
         [DataType(DataType.Password)]
-        [Display(Name = "Confirmar Nueva Contraseña")]
-        [Compare("ClaveNueva", ErrorMessage = "Las contraseñas no coinciden")]
+        [Display(Name = "Confirmar Nueva ContraseÃ±a")]
+        [Compare("ClaveNueva", ErrorMessage = "Las contraseÃ±as no coinciden")]
         public string ConfirmarClave { get; set; } = "";
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\Cliente.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\Cliente.cs =====
 namespace TallerApp.Web.Models
 {
     public class Cliente
@@ -2330,10 +2252,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\ComprobantePago.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\ComprobantePago.cs =====
 namespace TallerApp.Web.Models
 {
     public class ComprobantePago
@@ -2349,10 +2268,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\ComprobantePagoViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\ComprobantePagoViewModel.cs =====
 using System.ComponentModel.DataAnnotations;
 
 namespace TallerApp.Web.Models
@@ -2386,11 +2302,7 @@ namespace TallerApp.Web.Models
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\CrearOrdenViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\CrearOrdenViewModel.cs =====
 using System.Collections.Generic;
 
 namespace TallerApp.Web.Models
@@ -2416,11 +2328,7 @@ namespace TallerApp.Web.Models
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\EditarDatosViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\EditarDatosViewModel.cs =====
 using System.ComponentModel.DataAnnotations;
 
 namespace TallerApp.Web.Models
@@ -2432,17 +2340,13 @@ namespace TallerApp.Web.Models
         public string NombreCompleto { get; set; } = "";
 
         [Required(ErrorMessage = "El email es obligatorio")]
-        [EmailAddress(ErrorMessage = "El email no es válido")]
+        [EmailAddress(ErrorMessage = "El email no es vÃ¡lido")]
         [Display(Name = "Email")]
         public string Email { get; set; } = "";
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\ErrorViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\ErrorViewModel.cs =====
 namespace TallerApp.Web.Models;
 
 public class ErrorViewModel
@@ -2453,10 +2357,7 @@ public class ErrorViewModel
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\LoginViewModel.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\LoginViewModel.cs =====
 using System.ComponentModel.DataAnnotations;
 
 namespace TallerApp.Web.Models
@@ -2466,7 +2367,7 @@ namespace TallerApp.Web.Models
            [Required(ErrorMessage = "El usuario es obligatorio.")]
    public string Email { get; set; } = string.Empty;
 
-        [Required(ErrorMessage = "La contraseña es obligatoria.")]
+        [Required(ErrorMessage = "La contraseÃ±a es obligatoria.")]
         [DataType(DataType.Password)]
         public string Password { get; set; } = string.Empty;
 
@@ -2474,11 +2375,7 @@ namespace TallerApp.Web.Models
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\Mecanico.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\Mecanico.cs =====
 namespace TallerApp.Web.Models
 {
     public class Mecanico
@@ -2493,10 +2390,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\OrdenRepuesto.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\OrdenRepuesto.cs =====
 namespace TallerApp.Web.Models
 {
     public class OrdenRepuesto
@@ -2510,10 +2404,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\OrdenTrabajo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\OrdenTrabajo.cs =====
 namespace TallerApp.Web.Models
 {
     public class OrdenTrabajo
@@ -2532,17 +2423,14 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\PasswordHelper.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\PasswordHelper.cs =====
 using System.Security.Cryptography;
 
 namespace TallerApp.Web.Models
 {
     /// <summary>
-    /// Genera y verifica hashes de contraseña usando PBKDF2 (estándar, seguro).
-    /// No guarda la contraseña en texto plano, solo el hash + la sal.
+    /// Genera y verifica hashes de contraseÃ±a usando PBKDF2 (estÃ¡ndar, seguro).
+    /// No guarda la contraseÃ±a en texto plano, solo el hash + la sal.
     /// </summary>
     public static class PasswordHelper
     {
@@ -2550,7 +2438,7 @@ namespace TallerApp.Web.Models
         private const int TamanioSal = 16;   // bytes
         private const int TamanioHash = 32;  // bytes
 
-        // Genera un hash nuevo a partir de una contraseña en texto plano.
+        // Genera un hash nuevo a partir de una contraseÃ±a en texto plano.
         // Formato guardado: "iteraciones.saltEnBase64.hashEnBase64"
         public static string GenerarHash(string password)
         {
@@ -2560,7 +2448,7 @@ namespace TallerApp.Web.Models
             return $"{Iteraciones}.{Convert.ToBase64String(sal)}.{Convert.ToBase64String(hash)}";
         }
 
-        // Verifica que una contraseña en texto plano coincida con un hash almacenado.
+        // Verifica que una contraseÃ±a en texto plano coincida con un hash almacenado.
         public static bool VerificarHash(string password, string hashAlmacenado)
         {
             var partes = hashAlmacenado.Split('.', 3);
@@ -2585,11 +2473,7 @@ namespace TallerApp.Web.Models
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\Repuesto.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\Repuesto.cs =====
 namespace TallerApp.Web.Models
 {
     public class Repuesto
@@ -2604,10 +2488,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\Usuario.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\Usuario.cs =====
 namespace TallerApp.Web.Models
 {
     public class Usuario
@@ -2626,11 +2507,7 @@ namespace TallerApp.Web.Models
     }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Models\Vehiculo.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Models\Vehiculo.cs =====
 namespace TallerApp.Web.Models
 {
     public class Vehiculo
@@ -2646,10 +2523,7 @@ namespace TallerApp.Web.Models
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Properties\launchSettings.json
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Properties\launchSettings.json =====
 {
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
@@ -2675,10 +2549,7 @@ ARCHIVO: TallerApp.Web\Properties\launchSettings.json
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\AccesoDenegado.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\AccesoDenegado.cshtml =====
 @{
     ViewData["Title"] = "Acceso denegado";
 }
@@ -2688,10 +2559,7 @@ ARCHIVO: TallerApp.Web\Views\Account\AccesoDenegado.cshtml
 <a asp-controller="Home" asp-action="Index" class="btn btn-secondary">Volver al inicio</a>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\CambiarAvatar.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\CambiarAvatar.cshtml =====
 @model TallerApp.Web.Models.Usuario
 @{
     ViewData["Title"] = "Cambiar Avatar";
@@ -2753,10 +2621,7 @@ ARCHIVO: TallerApp.Web\Views\Account\CambiarAvatar.cshtml
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\CambiarClave.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\CambiarClave.cshtml =====
 @model TallerApp.Web.Models.CambiarClaveViewModel
 @{
     ViewData["Title"] = "Cambiar ContraseÃ±a";
@@ -2798,11 +2663,7 @@ ARCHIVO: TallerApp.Web\Views\Account\CambiarClave.cshtml
     <partial name="_ValidationScriptsPartial" />
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\EditarDatos.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\EditarDatos.cshtml =====
 @model TallerApp.Web.Models.EditarDatosViewModel
 @{
     ViewData["Title"] = "Editar Datos Personales";
@@ -2838,11 +2699,7 @@ ARCHIVO: TallerApp.Web\Views\Account\EditarDatos.cshtml
     <partial name="_ValidationScriptsPartial" />
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\Login.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\Login.cshtml =====
 @model TallerApp.Web.Models.LoginViewModel
 @{
     ViewData["Title"] = "Iniciar Sesión";
@@ -2891,11 +2748,7 @@ ARCHIVO: TallerApp.Web\Views\Account\Login.cshtml
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Account\Perfil.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Account\Perfil.cshtml =====
 @model TallerApp.Web.Models.Usuario
 @{
     ViewData["Title"] = "Mi Perfil";
@@ -2962,11 +2815,7 @@ ARCHIVO: TallerApp.Web\Views\Account\Perfil.cshtml
     </div>
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Clientes\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Clientes\Create.cshtml =====
 @model TallerApp.Web.Models.Cliente
 
 @{
@@ -3015,10 +2864,7 @@ ARCHIVO: TallerApp.Web\Views\Clientes\Create.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Clientes\Delete.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Clientes\Delete.cshtml =====
 @model TallerApp.Web.Models.Cliente
 
 @{
@@ -3049,10 +2895,7 @@ ARCHIVO: TallerApp.Web\Views\Clientes\Delete.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Clientes\Edit.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Clientes\Edit.cshtml =====
 @model TallerApp.Web.Models.Cliente
 
 @{
@@ -3102,10 +2945,7 @@ ARCHIVO: TallerApp.Web\Views\Clientes\Edit.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Clientes\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Clientes\Index.cshtml =====
 @model IEnumerable<TallerApp.Web.Models.Cliente>
 
 @{
@@ -3204,11 +3044,7 @@ ARCHIVO: TallerApp.Web\Views\Clientes\Index.cshtml
     }
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\ComprobantesPago\Create.cshtml =====
 @model TallerApp.Web.Models.ComprobantePagoViewModel
 
 @{
@@ -3265,11 +3101,7 @@ ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Create.cshtml
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Delete.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\ComprobantesPago\Delete.cshtml =====
 @model TallerApp.Web.Models.ComprobantePago
 
 @{
@@ -3310,11 +3142,7 @@ ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Delete.cshtml
     </form>
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Edit.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\ComprobantesPago\Edit.cshtml =====
 @model TallerApp.Web.Models.ComprobantePagoViewModel
 
 @{
@@ -3380,11 +3208,7 @@ ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Edit.cshtml
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\ComprobantesPago\Index.cshtml =====
 @model IEnumerable<TallerApp.Web.Models.ComprobantePago>
 
 @{
@@ -3501,11 +3325,7 @@ ARCHIVO: TallerApp.Web\Views\ComprobantesPago\Index.cshtml
     }
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Home\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Home\Index.cshtml =====
 @{
     ViewData["Title"] = "Home Page";
 }
@@ -3516,10 +3336,7 @@ ARCHIVO: TallerApp.Web\Views\Home\Index.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Home\Privacy.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Home\Privacy.cshtml =====
 @{
     ViewData["Title"] = "Privacy Policy";
 }
@@ -3528,10 +3345,7 @@ ARCHIVO: TallerApp.Web\Views\Home\Privacy.cshtml
 <p>Use this page to detail your site's privacy policy.</p>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Mecanicos\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Mecanicos\Create.cshtml =====
 @model TallerApp.Web.Models.Mecanico
 
 @{
@@ -3580,10 +3394,7 @@ ARCHIVO: TallerApp.Web\Views\Mecanicos\Create.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Mecanicos\Delete.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Mecanicos\Delete.cshtml =====
 @model TallerApp.Web.Models.Mecanico
 
 @{
@@ -3614,10 +3425,7 @@ ARCHIVO: TallerApp.Web\Views\Mecanicos\Delete.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Mecanicos\Edit.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Mecanicos\Edit.cshtml =====
 @model TallerApp.Web.Models.Mecanico
 
 @{
@@ -3667,10 +3475,7 @@ ARCHIVO: TallerApp.Web\Views\Mecanicos\Edit.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Mecanicos\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Mecanicos\Index.cshtml =====
 @model IEnumerable<TallerApp.Web.Models.Mecanico>
 
 @{
@@ -3769,11 +3574,7 @@ ARCHIVO: TallerApp.Web\Views\Mecanicos\Index.cshtml
     }
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Ordenes\Create.cshtml =====
 @{
     ViewData["Title"] = "Nueva Orden de Trabajo";
 }
@@ -3787,7 +3588,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
     <div class="card shadow">
         <div class="card-body">
 
-            <!-- Cliente con búsqueda asíncrona -->
+            <!-- Cliente con bÃºsqueda asÃ­ncrona -->
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label">Cliente</label>
@@ -3802,9 +3603,9 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                 </div>
 
                 <div class="col-md-6">
-                    <label class="form-label">Vehículo</label>
+                    <label class="form-label">VehÃ­culo</label>
                     <select class="form-select" v-model="vehiculoId" :disabled="!clienteId">
-                        <option value="">Seleccione un vehículo...</option>
+                        <option value="">Seleccione un vehÃ­culo...</option>
                         <option v-for="v in vehiculos" :value="v.idVehiculo">
                             {{ v.patente }} - {{ v.marca }} {{ v.modelo }} ({{ v.anio }})
                         </option>
@@ -3812,14 +3613,14 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                 </div>
             </div>
 
-            <!-- Mecánico con búsqueda asíncrona -->
+            <!-- MecÃ¡nico con bÃºsqueda asÃ­ncrona -->
             <div class="row mb-3">
                 <div class="col-md-6">
-                    <label class="form-label">Mecánico</label>
+                    <label class="form-label">MecÃ¡nico</label>
                     <input type="text" class="form-control mb-2" v-model="busquedaMecanico" 
-                           @@input="buscarMecanicos" placeholder="Buscar mecánico por nombre o matrícula...">
+                           @@input="buscarMecanicos" placeholder="Buscar mecÃ¡nico por nombre o matrÃ­cula...">
                     <select class="form-select" v-model="mecanicoId">
-                        <option value="">Seleccione un mecánico...</option>
+                        <option value="">Seleccione un mecÃ¡nico...</option>
                         <option v-for="m in mecanicos" :value="m.idMecanico">
                             {{ m.nombreCompleto }} - {{ m.especialidad }}
                         </option>
@@ -3832,22 +3633,22 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                 </div>
             </div>
 
-            <!-- Descripción -->
+            <!-- DescripciÃ³n -->
             <div class="mb-3">
-                <label class="form-label">Descripción del Problema</label>
+                <label class="form-label">DescripciÃ³n del Problema</label>
                 <textarea class="form-control" rows="3" v-model="descripcionProblema"
-                          placeholder="Describa el problema del vehículo..."></textarea>
+                          placeholder="Describa el problema del vehÃ­culo..."></textarea>
             </div>
 
             <hr>
 
-            <!-- Sección de Repuestos -->
+            <!-- SecciÃ³n de Repuestos -->
             <h5 class="mb-3">Repuestos</h5>
 
             <div class="row mb-3">
                 <div class="col-md-8">
                     <input type="text" class="form-control" v-model="busquedaRepuesto"
-                           @@input="buscarRepuestos" placeholder="Buscar repuesto por nombre o código...">
+                           @@input="buscarRepuestos" placeholder="Buscar repuesto por nombre o cÃ³digo...">
                 </div>
                 <div class="col-md-4">
                     <select class="form-select" v-model="repuestoSeleccionado">
@@ -3871,7 +3672,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                     <thead class="table-dark">
                         <tr>
                             <th>Repuesto</th>
-                            <th>Código</th>
+                            <th>CÃ³digo</th>
                             <th width="120">Cantidad</th>
                             <th>Precio Unit.</th>
                             <th>Subtotal</th>
@@ -3903,7 +3704,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
             </div>
 
             <div v-else class="alert alert-info">
-                No hay repuestos agregados todavía.
+                No hay repuestos agregados todavÃ­a.
             </div>
 
             <hr>
@@ -3914,7 +3715,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                 <textarea class="form-control" rows="2" v-model="observaciones"></textarea>
             </div>
 
-            <!-- Botón Guardar -->
+            <!-- BotÃ³n Guardar -->
             <div class="d-flex justify-content-end gap-2">
                 <button class="btn btn-primary btn-lg" @@click="guardarOrden" :disabled="guardando">
                     <span v-if="guardando">Guardando...</span>
@@ -3949,7 +3750,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                     descripcionProblema: '',
                     observaciones: '',
 
-                    // Búsqueda asíncrona
+                    // BÃºsqueda asÃ­ncrona
                     busquedaCliente: '',
                     busquedaMecanico: '',
 
@@ -3970,8 +3771,8 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                 }
             },
             mounted() {
-                // Ya no cargamos todos los clientes y mecánicos al inicio
-                // Se cargarán bajo demanda con la búsqueda
+                // Ya no cargamos todos los clientes y mecÃ¡nicos al inicio
+                // Se cargarÃ¡n bajo demanda con la bÃºsqueda
             },
             methods: {
                 async buscarClientes() {
@@ -4032,9 +3833,9 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                     }, 0);
                 },
                 async guardarOrden() {
-                    // Validaciones básicas
+                    // Validaciones bÃ¡sicas
                     if (!this.clienteId || !this.vehiculoId || !this.mecanicoId) {
-                        this.mensaje = 'Debe seleccionar Cliente, Vehículo y Mecánico';
+                        this.mensaje = 'Debe seleccionar Cliente, VehÃ­culo y MecÃ¡nico';
                         this.mensajeExito = false;
                         return;
                     }
@@ -4079,7 +3880,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
                             this.mensajeExito = false;
                         }
                     } catch (error) {
-                        this.mensaje = 'Error de conexión: ' + error.message;
+                        this.mensaje = 'Error de conexiÃ³n: ' + error.message;
                         this.mensajeExito = false;
                     } finally {
                         this.guardando = false;
@@ -4090,11 +3891,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Create.cshtml
     </script>
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Ordenes\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Ordenes\Index.cshtml =====
 @{
     ViewData["Title"] = "Órdenes de Trabajo";
 }
@@ -4119,11 +3916,7 @@ ARCHIVO: TallerApp.Web\Views\Ordenes\Index.cshtml
     </div>
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Repuestos\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Repuestos\Create.cshtml =====
 @model TallerApp.Web.Models.Repuesto
 
 @{
@@ -4172,10 +3965,7 @@ ARCHIVO: TallerApp.Web\Views\Repuestos\Create.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Repuestos\Delete.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Repuestos\Delete.cshtml =====
 @model TallerApp.Web.Models.Repuesto
 
 @{
@@ -4206,10 +3996,7 @@ ARCHIVO: TallerApp.Web\Views\Repuestos\Delete.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Repuestos\Edit.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Repuestos\Edit.cshtml =====
 @model TallerApp.Web.Models.Repuesto
 
 @{
@@ -4259,10 +4046,7 @@ ARCHIVO: TallerApp.Web\Views\Repuestos\Edit.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Repuestos\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Repuestos\Index.cshtml =====
 @model IEnumerable<TallerApp.Web.Models.Repuesto>
 
 @{
@@ -4361,11 +4145,7 @@ ARCHIVO: TallerApp.Web\Views\Repuestos\Index.cshtml
     }
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Shared\Error.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Shared\Error.cshtml =====
 @model ErrorViewModel
 @{
     ViewData["Title"] = "Error";
@@ -4393,10 +4173,7 @@ ARCHIVO: TallerApp.Web\Views\Shared\Error.cshtml
 </p>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Shared\_Layout.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Shared\_Layout.cshtml =====
 <!DOCTYPE html>
 <html lang="es">
 
@@ -4496,19 +4273,12 @@ ARCHIVO: TallerApp.Web\Views\Shared\_Layout.cshtml
 
             </html>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Shared\_ValidationScriptsPartial.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Shared\_ValidationScriptsPartial.cshtml =====
 <script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
 <script src="~/lib/jquery-validation-unobtrusive/dist/jquery.validate.unobtrusive.min.js"></script>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Vehiculos\Create.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Vehiculos\Create.cshtml =====
 @model TallerApp.Web.Models.Vehiculo
 
 @{
@@ -4564,10 +4334,7 @@ ARCHIVO: TallerApp.Web\Views\Vehiculos\Create.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Vehiculos\Delete.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Vehiculos\Delete.cshtml =====
 @model TallerApp.Web.Models.Vehiculo
 
 @{
@@ -4601,10 +4368,7 @@ ARCHIVO: TallerApp.Web\Views\Vehiculos\Delete.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Vehiculos\Edit.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Vehiculos\Edit.cshtml =====
 @model TallerApp.Web.Models.Vehiculo
 
 @{
@@ -4661,10 +4425,7 @@ ARCHIVO: TallerApp.Web\Views\Vehiculos\Edit.cshtml
 </div>
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\Vehiculos\Index.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\Vehiculos\Index.cshtml =====
 @model IEnumerable<TallerApp.Web.Models.Vehiculo>
 
 @{
@@ -4767,29 +4528,19 @@ ARCHIVO: TallerApp.Web\Views\Vehiculos\Index.cshtml
     }
 </div>
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\_ViewImports.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\_ViewImports.cshtml =====
 @using TallerApp.Web
 @using TallerApp.Web.Models
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\Views\_ViewStart.cshtml
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Views\_ViewStart.cshtml =====
 @{
     Layout = "_Layout";
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\appsettings.Development.json
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\appsettings.Development.json =====
 {
   "Logging": {
     "LogLevel": {
@@ -4800,10 +4551,7 @@ ARCHIVO: TallerApp.Web\appsettings.Development.json
 }
 
 
-=====================================================================
-ARCHIVO: TallerApp.Web\appsettings.json
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\appsettings.json =====
 {
   "Logging": {
     "LogLevel": {
@@ -4817,17 +4565,18 @@ ARCHIVO: TallerApp.Web\appsettings.json
   }
 }
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\Program.cs
-=====================================================================
-
+===== C:\Users\Estudiante\Documents\TallerApp\TallerApp.Web\Program.cs =====
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using TallerApp.Web.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Agregar servicios al contenedor
 builder.Services.AddControllersWithViews();
+builder.Services.AddControllers(); // Necesario para la API
 
 // Registrar los repositorios
 builder.Services.AddScoped<IRepositorioUsuario, RepositorioUsuario>();
@@ -4844,16 +4593,35 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("SoloAdmin", policy => policy.RequireRole("Admin"));
 });
 
-// 2. Configurar autenticación por cookies
-builder.Services.AddAuthentication("Cookies")
-    .AddCookie("Cookies", options => {
-        options.LoginPath = "/Account/Login";
-        options.AccessDeniedPath = "/Account/AccesoDenegado";
-    });
+// 2. Configurar Autenticación: Cookies (Web por defecto) + JWT (API)
+builder.Services.AddAuthentication(options =>
+{
+    // ¡IMPORTANTE! El esquema por defecto es Cookies para que la web funcione normal
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options => {
+    options.LoginPath = "/Account/Login";
+    options.AccessDeniedPath = "/Account/AccesoDenegado";
+})
+.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = "TallerAppIssuer",
+        ValidAudience = "TallerAppAudience",
+        IssuerSigningKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes("TuClaveSecretaMuyLargaYSeguraDeAlMenos32Caracteres123!")
+        )
+    };
+});
 
 var app = builder.Build();
 
-// Configurar el pipeline de solicitud HTTP
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
@@ -4863,6 +4631,8 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+
+// ¡El orden es importante!
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -4872,98 +4642,3 @@ app.MapControllerRoute(
 
 app.Run();
 
-
-=====================================================================
-ARCHIVO: TallerApp.Web\TallerApp.Web.csproj
-=====================================================================
-
-<Project Sdk="Microsoft.NET.Sdk.Web">
-
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
-  </ItemGroup>
-
-</Project>
-
-
-=====================================================================
-ARCHIVO: README.md
-=====================================================================
-
-# 🚗 TallerApp - Sistema de Gestión de Taller Mecánico
-
-## 📌 Descripción General
-Sistema web desarrollado en ASP.NET Core MVC para la gestión integral de un taller mecánico. Permite administrar clientes, vehículos, mecánicos, repuestos, órdenes de trabajo y comprobantes de pago. Resuelve el problema de la gestión manual de órdenes, el control de stock de repuestos en tiempo real y la trazabilidad de los pagos mediante comprobantes digitales.
-
-## 🛠️ Tecnologías Utilizadas
-- **Backend:** ASP.NET Core 10 MVC (C#)
-- **Base de Datos:** MySQL 8.0 (con MySqlConnector)
-- **Frontend Dinámico:** Vue.js 3 (CDN) para componentes reactivos sin recarga de página
-- **Autenticación:** Cookies con manejo de Roles (Admin/Empleado)
-- **Control de Versiones:** Git + GitHub
-
-## 🔑 Credenciales de Prueba
-| Rol | Email | Contraseña |
-|-----|-------|------------|
-| Administrador | admin@tallerapp.com | Admin123 |
-
----
-
-## 📋 Matriz de Evidencias de Requerimientos Mínimos
-
-| # | Requerimiento Mínimo | Estado | Enlace al Código / Controladores | Evidencia |
-|---|---|---|---|---|
-| 1 | **6+ Tablas y Relaciones (1:N y N:M)** | ✅ Cumplido | [Modelos](TallerApp.Web/Models/) (8 entidades). Relación N:M: \OrdenTrabajo\ ↔ \Repuestos\ vía \OrdenRepuesto\. | Ver archivo \docs/der.png\ |
-| 2 | **Login, Roles y Avatar** | ✅ Cumplido | [AccountController.cs](TallerApp.Web/Controllers/AccountController.cs). Manejo de claims, roles y actualización de sesión. | Captura de perfil con avatar en la app. |
-| 3 | **Manejo de Archivos (Extra)** | ✅ Cumplido | [ComprobantesPagoController.cs](TallerApp.Web/Controllers/ComprobantesPagoController.cs) (Validación de tipo/tamaño y almacenamiento seguro). | Captura de subida de comprobante PDF/JPG. |
-| 4 | **ABM en Vue.js + AJAX** | ✅ Cumplido | [Ordenes/Create.cshtml](TallerApp.Web/Views/Ordenes/Create.cshtml). Formulario reactivo para creación de órdenes sin recarga. | Captura/GIF del formulario de órdenes dinámico. |
-| 5 | **Paginado por Servidor** | ✅ Cumplido | [RepositorioCliente.cs](TallerApp.Web/Data/RepositorioCliente.cs) (Uso de \LIMIT\ y \OFFSET\ en consultas SQL). | Captura de la UI mostrando paginación funcional. |
-| 6 | **Selección Asíncrona (AJAX)** | ✅ Cumplido | [OrdenesController.cs](TallerApp.Web/Controllers/OrdenesController.cs) (\GetClientes\, \GetMecanicos\ con parámetro \usqueda\ para no cargar 1000 registros). | Captura/GIF buscando entidades en desplegable. |
-| 7 | **Web API + JWT** | ⚠️ En desarrollo | Pendiente de implementación final y documentación Postman por parte del Integrante 3. | - |
-
----
-
-## 🚀 Instalación y Ejecución Local
-
-1. **Clonar el repositorio:**
-   \\\ash
-   git clone https://github.com/jontive21/TallerApp.git
-   cd TallerApp
-   \\\
-2. **Restaurar dependencias:**
-   \\\ash
-   cd TallerApp.Web
-   dotnet restore
-   \\\
-3. **Configurar la Base de Datos:**
-   - Asegúrate de tener un servidor MySQL corriendo.
-   - Crea una base de datos llamada \db_tallerapp\.
-   - Ejecuta el script SQL proporcionado en \docs/db_tallerapp.sql\ para crear las tablas, relaciones y datos de prueba.
-   - Verifica que la cadena de conexión en \ppsettings.json\ coincida con tu configuración local.
-4. **Ejecutar la aplicación:**
-   \\\ash
-   dotnet run
-   \\\
-5. Accede a \http://localhost:5063\ en tu navegador web.
-
----
-
-## 📂 Estructura del Proyecto
-- \Controllers/\ - Controladores MVC que manejan las rutas, validaciones y lógica de presentación.
-- \Data/\ - Interfaces e implementaciones de los repositorios (patrón Repository) para acceso seguro a MySQL.
-- \Models/\ - Entidades de dominio y ViewModels para la validación de formularios con Data Annotations.
-- \Views/\ - Vistas Razor (.cshtml) y componentes dinámicos con Vue.js.
-- \wwwroot/\ - Archivos estáticos (CSS, JS, imágenes). *Nota: Las carpetas \uploads\ y \vatars\ están excluidas del repositorio vía \.gitignore\*.
-
----
-
-## 📝 Notas para la Evaluación
-- El proyecto cumple con todos los requisitos técnicos y funcionales para la **Regularización**.
-- Se ha prestado especial atención a la integridad de los datos: la creación de órdenes de trabajo utiliza **transacciones de base de datos** para garantizar que, si falla la inserción de un repuesto, se revierta toda la operación y se mantenga la consistencia del stock.
-- Los archivos subidos por usuarios (avatares, comprobantes) están correctamente excluidos del repositorio mediante \.gitignore\ para mantener el repositorio ligero, seguro y profesional.
