@@ -22,6 +22,32 @@ namespace TallerApp.Web.Controllers
             _entorno = entorno;
         }
 
+        // ==========================================================
+        // ENDPOINT TEMPORAL - Para generar hash y crear usuarios
+        // ==========================================================
+        [HttpGet("TempRegister")]
+        public IActionResult TempRegister()
+        {
+            // 1. Generar hash de la contraseña "Admin123"
+            var passwordHash = PasswordHelper.GenerarHash("Admin123");
+            
+            // 2. Crear el objeto Usuario
+            var admin = new Usuario
+            {
+                Email = "admin@tallerapp.com",
+                PasswordHash = passwordHash,
+                NombreCompleto = "Administrador",
+                Rol = "Admin"
+            };
+            
+            // 3. Insertar en la base de datos
+            _repoUsuario.Alta(admin); 
+            
+            // 4. Mostrar el resultado
+            return Content($"Hash generado: {passwordHash}\n\nUsuario Admin creado exitosamente. ID: {admin.IdUsuario}");
+        }
+        // ==========================================================
+
         // ===================== LOGIN / LOGOUT =====================
         [HttpGet]
         public IActionResult Login(string? returnUrl = null)
